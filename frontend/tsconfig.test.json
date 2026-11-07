@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "./.test-dist",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "jsx": "react-jsx",
+    "incremental": false
+  },
+  "include": [
+    "src/lib/**/*.ts",
+    "src/components/**/*.tsx",
+    "src/app/page.tsx",
+    "src/app/accounts/page.tsx",
+    "src/app/transactions/page.tsx",
+    "src/app/budget/page.tsx",
+    "src/app/expectations/page.tsx",
+    "tests/**/*.tsx"
+  ]
+}
+
