@@ -3,14 +3,18 @@
 namespace App\Http\Controllers;
 
 use App\Domain\Telegram\TelegramAuthorizationException;
+use App\Domain\Telegram\TelegramBotClient;
+use App\Domain\Telegram\TelegramDeliveryException;
 use App\Domain\Telegram\TelegramPayloadException;
 use App\Domain\Telegram\TelegramWebhookProcessor;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 final class TelegramWebhookController extends Controller
 {
-    public function __invoke(Request $request, TelegramWebhookProcessor $processor): JsonResponse
+    public function __invoke(Request $request, TelegramWebhookProcessor $processor, TelegramBotClient $telegram): JsonResponse
     {
         $secretHeader = $request->header('X-Telegram-Bot-Api-Secret-Token');
 
@@ -29,6 +33,19 @@ final class TelegramWebhookController extends Controller
             ], 422)->header('Cache-Control', 'no-store');
         }
 
+        try {
+            $telegram->sendMessage($result->chatId, $result->replyText);
+        } catch (TelegramDeliveryException|ConnectionException $exception) {
+            Log::warning('Telegram webhook reply delivery failed.', [
+                'update_id' => $result->updateId,
+                'http_status' => $exception instanceof TelegramDeliveryException ? $exception->httpStatus : null,
+            ]);
+
+            return response()->json([
+                'message' => 'Telegram reply delivery failed.',
+            ], 503)->header('Cache-Control', 'no-store');
+        }
+
         return response()->json([
             'status' => $result->duplicate ? 'duplicate' : 'processed',
             'duplicate' => $result->duplicate,
@@ -39,4 +56,3 @@ final class TelegramWebhookController extends Controller
         ])->header('Cache-Control', 'no-store');
     }
 }
-

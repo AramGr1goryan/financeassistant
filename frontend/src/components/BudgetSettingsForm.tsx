@@ -12,7 +12,7 @@ export function BudgetSettingsForm({
   initial?: BudgetSettingsInput;
   busy: boolean;
   onBusyChange: (busy: boolean) => void;
-  onSaved: () => Promise<void>;
+  onSaved: () => Promise<boolean>;
 }) {
   const [mandatory, setMandatory] = useState(initial?.mandatory_payments ?? "");
   const [reserve, setReserve] = useState(initial?.protected_reserve ?? "");
@@ -37,12 +37,11 @@ export function BudgetSettingsForm({
         allocated_savings: savings,
         planning_days: Number(days),
       });
-      await onSaved();
-      setMessage("Settings saved.");
+      if (await onSaved()) setMessage("Settings saved.");
     } catch (failure) {
       setMessage(failure instanceof SessionError && failure.status === 401
         ? "Your session has expired. Sign in again."
-        : "Settings could not be saved. Check your connection and try again.");
+        : "Could not confirm whether settings were saved. Refresh the budget before trying again.");
     } finally {
       onBusyChange(false);
     }

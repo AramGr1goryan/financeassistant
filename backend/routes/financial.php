@@ -1,9 +1,12 @@
 <?php
 
+use App\Http\Controllers\Api\AccountController;
 use App\Http\Controllers\Api\BalanceController;
 use App\Http\Controllers\Api\BudgetController;
 use App\Http\Controllers\Api\BudgetSettingController;
+use App\Http\Controllers\Api\IncomeExpectationController;
 use App\Http\Controllers\Api\SessionController;
+use App\Http\Controllers\Api\TransactionController;
 use App\Http\Middleware\AuthenticateFinancialApi;
 use Illuminate\Support\Facades\Route;
 
@@ -16,6 +19,14 @@ Route::prefix('api/v1')->name('api.v1.')->group(function (): void {
     Route::middleware(AuthenticateFinancialApi::class.':web')->group(function (): void {
         Route::delete('/session', [SessionController::class, 'destroy'])->name('session.destroy');
         Route::get('/balance', BalanceController::class)->name('balance');
+        Route::get('/accounts', [AccountController::class, 'index'])->name('accounts.index');
+        Route::post('/accounts', [AccountController::class, 'store'])->name('accounts.store');
+        Route::get('/transactions', [TransactionController::class, 'index'])->name('transactions.index');
+        Route::post('/transactions', [TransactionController::class, 'store'])->name('transactions.store');
+        Route::post('/transactions/{id}/status', [TransactionController::class, 'updateStatus'])->name('transactions.status.update');
+        Route::get('/income-expectations', [IncomeExpectationController::class, 'index'])->name('income-expectations.index');
+        Route::post('/income-expectations', [IncomeExpectationController::class, 'store'])->name('income-expectations.store');
+        Route::post('/income-expectations/{id}/complete', [IncomeExpectationController::class, 'complete'])->name('income-expectations.complete');
         Route::get('/budget', BudgetController::class)->name('budget');
         Route::post('/budget/settings', BudgetSettingController::class)->name('budget.settings.store');
     });

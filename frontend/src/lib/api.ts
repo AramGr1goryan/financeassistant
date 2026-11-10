@@ -2,10 +2,126 @@ export interface ApiStatusResponse {
   status: string;
 }
 
+export async function updateManualTransactionStatus(
+  transactionId: string,
+  status: "POSTED" | "REVERSED" | "DECLINED",
+  fetcher: typeof fetch = fetch,
+  readCookie: () => string = () => document.cookie,
+): Promise<void> {
+  const token = await initializeCsrf(fetcher, readCookie);
+  const response = await fetcher(`/api/v1/transactions/${encodeURIComponent(transactionId)}/status`, {
+    method: "POST", credentials: "same-origin", cache: "no-store",
+    headers: { Accept: "application/json", "Content-Type": "application/json", "X-XSRF-TOKEN": token },
+    body: JSON.stringify({ status }),
+  });
+  if (!response.ok) throw new SessionError(response.status, "Transaction status could not be updated.");
+}
+
+interface TransactionApiItem {
+  id: string;
+  account_id: string;
+  account_name: string;
+  amount: MoneyResourceDto;
+  type: TransactionItemDto["type"];
+  status: TransactionItemDto["status"];
+  transaction_date: string;
+  description: string;
+  merchant: string | null;
+  transfer_direction: TransactionItemDto["transferDirection"];
+  is_generated_counterpart: boolean;
+}
+
+interface IncomeExpectationApiItem {
+  id: string;
+  description: string;
+  amount: MoneyResourceDto;
+  expected_date: string;
+  status: IncomeExpectationDto["status"];
+}
+
 export interface MoneyResourceDto {
   minor_units: string;
   currency: string;
   currency_exponent: number;
+}
+
+export async function fetchTransactions(fetcher: typeof fetch = fetch): Promise<TransactionItemDto[]> {
+  const response = await fetcher("/api/v1/transactions", {
+    credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw new SessionError(response.status, "Transactions could not be loaded.");
+  const body: { data: TransactionApiItem[] } = await response.json();
+  if (!Array.isArray(body.data)) throw new Error("Invalid transactions response.");
+  return body.data.map((transaction) => ({
+    id: transaction.id,
+    accountId: transaction.account_id,
+    accountName: transaction.account_name,
+    type: transaction.type,
+    status: transaction.status,
+    amountFormatted: formatMoneyResource(transaction.amount),
+    yerevanDate: transaction.transaction_date,
+    description: transaction.description,
+    merchant: transaction.merchant,
+    transferDirection: transaction.transfer_direction,
+    isGeneratedCounterpart: transaction.is_generated_counterpart,
+  }));
+}
+
+export async function createManualTransaction(
+  transaction: ManualTransactionInput,
+  fetcher: typeof fetch = fetch,
+  readCookie: () => string = () => document.cookie,
+): Promise<void> {
+  const token = await initializeCsrf(fetcher, readCookie);
+  const response = await fetcher("/api/v1/transactions", {
+    method: "POST", credentials: "same-origin", cache: "no-store",
+    headers: { Accept: "application/json", "Content-Type": "application/json", "X-XSRF-TOKEN": token },
+    body: JSON.stringify(transaction),
+  });
+  if (!response.ok) throw new SessionError(response.status, "Transaction could not be saved.");
+}
+
+export async function fetchIncomeExpectations(fetcher: typeof fetch = fetch): Promise<IncomeExpectationDto[]> {
+  const response = await fetcher("/api/v1/income-expectations", {
+    credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw new SessionError(response.status, "Income expectations could not be loaded.");
+  const body: { data: IncomeExpectationApiItem[] } = await response.json();
+  if (!Array.isArray(body.data)) throw new Error("Invalid income expectations response.");
+  return body.data.map((expectation) => ({
+    id: expectation.id,
+    description: expectation.description,
+    amountFormatted: formatMoneyResource(expectation.amount),
+    expectedDate: expectation.expected_date,
+    status: expectation.status,
+  }));
+}
+
+export async function createManualIncomeExpectation(
+  expectation: ManualIncomeExpectationInput,
+  fetcher: typeof fetch = fetch,
+  readCookie: () => string = () => document.cookie,
+): Promise<void> {
+  const token = await initializeCsrf(fetcher, readCookie);
+  const response = await fetcher("/api/v1/income-expectations", {
+    method: "POST", credentials: "same-origin", cache: "no-store",
+    headers: { Accept: "application/json", "Content-Type": "application/json", "X-XSRF-TOKEN": token },
+    body: JSON.stringify(expectation),
+  });
+  if (!response.ok) throw new SessionError(response.status, "Income expectation could not be saved.");
+}
+
+export async function completeManualIncomeExpectation(
+  id: string,
+  fetcher: typeof fetch = fetch,
+  readCookie: () => string = () => document.cookie,
+): Promise<void> {
+  const token = await initializeCsrf(fetcher, readCookie);
+  const response = await fetcher(`/api/v1/income-expectations/${encodeURIComponent(id)}/complete`, {
+    method: "POST", credentials: "same-origin", cache: "no-store",
+    headers: { Accept: "application/json", "Content-Type": "application/json", "X-XSRF-TOKEN": token },
+  });
+  if (!response.ok) throw new SessionError(response.status, "Income expectation could not be completed.");
 }
 
 export interface BalanceApiResponse {
@@ -67,8 +183,26 @@ export interface AccountItemDto {
   isActive: boolean;
 }
 
+export interface ManualAccountInput {
+  id: string;
+  name: string;
+  type: "ASSET" | "CREDIT";
+  opening_balance: string;
+}
+
+interface AccountApiItem {
+  id: string;
+  name: string;
+  type: "ASSET" | "CREDIT";
+  is_active: boolean;
+  posted_balance: MoneyResourceDto;
+  pending_change: MoneyResourceDto;
+  credit_liability: MoneyResourceDto;
+}
+
 export interface TransactionItemDto {
   id: string;
+  accountId: string;
   accountName: string;
   type: "INCOME" | "EXPENSE" | "TRANSFER" | "REFUND" | "FEE" | "ADJUSTMENT";
   status: "PENDING" | "POSTED" | "REVERSED" | "DECLINED";
@@ -76,6 +210,20 @@ export interface TransactionItemDto {
   yerevanDate: string;
   description: string;
   merchant: string | null;
+  transferDirection: "IN" | "OUT" | null;
+  isGeneratedCounterpart: boolean;
+}
+
+export interface ManualTransactionInput {
+  idempotency_key: string;
+  account_id: string;
+  amount_minor_units: string;
+  type: TransactionItemDto["type"];
+  status: "PENDING" | "POSTED";
+  transaction_date: string;
+  description?: string;
+  transfer_direction?: "IN" | "OUT";
+  transfer_counterpart_account_id?: string;
 }
 
 export interface IncomeExpectationDto {
@@ -84,6 +232,13 @@ export interface IncomeExpectationDto {
   amountFormatted: string;
   expectedDate: string;
   status: "PLANNED" | "COMPLETED";
+}
+
+export interface ManualIncomeExpectationInput {
+  id: string;
+  description: string;
+  amount_minor_units: string;
+  expected_date: string;
 }
 
 export interface DashboardWorkspacePayload {
@@ -104,6 +259,12 @@ export interface WorkspaceOverviewResult {
   connectionState: WorkspaceConnectionState;
   apiHealthy: boolean;
   data: DashboardWorkspacePayload | null;
+}
+
+export function budgetRefreshOutcome(result: WorkspaceOverviewResult): "ready" | "expired" | "unavailable" {
+  if (result.connectionState === "unauthenticated") return "expired";
+  if (result.connectionState === "ready" && result.data?.budget) return "ready";
+  return "unavailable";
 }
 
 const DEFAULT_API_BASE_URL = "/api/v1";
@@ -178,6 +339,7 @@ export async function fetchWorkspaceOverview(
   baseUrl?: string,
   currency = "AMD",
   currencyExponent = 0,
+  includeBudget = true,
 ): Promise<WorkspaceOverviewResult> {
   const apiHealthy = await fetchApiStatus(fetcher, baseUrl);
 
@@ -243,14 +405,14 @@ export async function fetchWorkspaceOverview(
     };
 
     let budgetSummary: BudgetSummaryDto | null = null;
-    const budgetResponse = await fetcher(`${resolvedBase}/budget?${query}`, {
+    const budgetResponse = includeBudget ? await fetcher(`${resolvedBase}/budget?${query}`, {
       method: "GET",
       credentials: "include",
       headers: { Accept: "application/json" },
       cache: "no-store",
-    });
+    }) : null;
 
-    if (budgetResponse.ok) {
+    if (budgetResponse?.ok) {
       const budgetBody = (await budgetResponse.json()) as Partial<BudgetApiResponse>;
       if (budgetBody.data?.available_funds) {
         const b = budgetBody.data;
@@ -273,9 +435,9 @@ export async function fetchWorkspaceOverview(
       if (!budgetSummary) {
         throw new Error("Invalid budget response.");
       }
-    } else if (budgetResponse.status === 401) {
+    } else if (budgetResponse?.status === 401) {
       return { connectionState: "unauthenticated", apiHealthy: true, data: null };
-    } else if (budgetResponse.status !== 404) {
+    } else if (budgetResponse && budgetResponse.status !== 404) {
       throw new Error(`Budget request failed (${budgetResponse.status}).`);
     }
 
@@ -340,6 +502,36 @@ async function initializeCsrf(fetcher: typeof fetch, readCookie: () => string): 
   });
   if (!csrf.ok) throw new SessionError(csrf.status, "Unable to initialize the session.");
   return csrfToken(readCookie());
+}
+
+export async function fetchAccounts(fetcher: typeof fetch = fetch): Promise<AccountItemDto[]> {
+  const response = await fetcher("/api/v1/accounts", {
+    credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw new SessionError(response.status, "Accounts could not be loaded.");
+  const body: { data: AccountApiItem[] } = await response.json();
+  if (!Array.isArray(body.data)) throw new Error("Invalid accounts response.");
+  return body.data.map((account) => ({
+    id: account.id, name: account.name, type: account.type, currency: account.posted_balance.currency,
+    isActive: account.is_active,
+    postedBalanceFormatted: formatMoneyResource(account.posted_balance),
+    pendingChangeFormatted: formatMoneyResource(account.pending_change),
+    creditLiabilityFormatted: formatMoneyResource(account.credit_liability),
+  }));
+}
+
+export async function createManualAccount(
+  account: ManualAccountInput,
+  fetcher: typeof fetch = fetch,
+  readCookie: () => string = () => document.cookie,
+): Promise<void> {
+  const token = await initializeCsrf(fetcher, readCookie);
+  const response = await fetcher("/api/v1/accounts", {
+    method: "POST", credentials: "same-origin", cache: "no-store",
+    headers: { Accept: "application/json", "Content-Type": "application/json", "X-XSRF-TOKEN": token },
+    body: JSON.stringify(account),
+  });
+  if (!response.ok) throw new SessionError(response.status, "Account could not be created.");
 }
 
 export async function saveBudgetSettings(

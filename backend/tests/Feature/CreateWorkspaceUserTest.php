@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\TelegramOwnerLink;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
@@ -42,6 +43,27 @@ class CreateWorkspaceUserTest extends TestCase
         ])->assertNoContent();
         $this->getJson('/api/v1/balance?currency=AMD&currency_exponent=0')
             ->assertOk()->assertJsonPath('data.owned_funds.minor_units', '0');
+    }
+
+    public function test_provisioned_user_is_linked_to_the_configured_telegram_owner(): void
+    {
+        config(['services.telegram.owner_id' => 777000111]);
+
+        $this->artisan('finance:create-user')
+            ->expectsQuestion('Name', 'Test Owner')
+            ->expectsQuestion('Email', 'owner@example.test')
+            ->expectsQuestion('Password (at least 12 characters, at most 72 bytes)', 'test-password-123')
+            ->expectsQuestion('Confirm password', 'test-password-123')
+            ->assertExitCode(0);
+
+        $owner = User::query()->where('email', 'owner@example.test')->firstOrFail();
+        $this->assertDatabaseHas('telegram_owner_links', [
+            'owner_id' => $owner->id,
+            'telegram_user_id' => 777000111,
+            'telegram_chat_id' => 777000111,
+            'is_active' => true,
+        ]);
+        $this->assertNotNull(TelegramOwnerLink::query()->where('owner_id', $owner->id)->value('verified_at'));
     }
 
     public function test_noninteractive_invocation_is_rejected(): void

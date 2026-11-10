@@ -14,6 +14,7 @@ use App\Models\NotificationPreference;
 use App\Models\User;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use InvalidArgumentException;
 use Tests\TestCase;
 
@@ -164,7 +165,12 @@ class NotificationServiceTest extends TestCase
 
     public function test_telegram_notifications_command_lists_and_updates_owner_preferences(): void
     {
+        Http::fake([
+            'api.telegram.org/*' => Http::response(['ok' => true], 200),
+        ]);
+
         config([
+            'services.telegram.bot_token' => 'test-bot-token',
             'services.telegram.webhook_secret' => 'webhook-secret',
             'services.telegram.owner_id' => 555666777,
         ]);
@@ -205,4 +211,3 @@ class NotificationServiceTest extends TestCase
         $this->assertStringContainsString('- SYNC_FAILURE: ON', (string) $listResponse->json('reply_text'));
     }
 }
-

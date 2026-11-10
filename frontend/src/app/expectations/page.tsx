@@ -4,6 +4,7 @@ import {
   IncomeExpectationsSection,
 } from "../../components/FinancialSections";
 import { WorkspaceShell } from "../../components/WorkspaceShell";
+import { LiveDashboard } from "../../components/LiveDashboard";
 import type { IncomeExpectationDto } from "../../lib/api";
 
 export function ExpectationsPageView({
@@ -27,6 +28,5 @@ export function ExpectationsPageView({
 }
 
 export default function ExpectationsPage() {
-  return <ExpectationsPageView />;
+  return <LiveDashboard currentPath="/expectations" />;
 }
-

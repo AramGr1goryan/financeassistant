@@ -1,12 +1,15 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
-import { BudgetSection, FinancialBoundaryCards } from "./FinancialSections";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { AccountsSection, BudgetSection, FinancialBoundaryCards, IncomeExpectationsSection, TransactionsSection } from "./FinancialSections";
 import { WorkspaceShell } from "./WorkspaceShell";
 import { BudgetSettingsForm } from "./BudgetSettingsForm";
-import { fetchWorkspaceOverview, SessionError, signIn, signOut, type WorkspaceOverviewResult } from "../lib/api";
+import { ManualAccountForm } from "./ManualAccountForm";
+import { ManualTransactionForm } from "./ManualTransactionForm";
+import { ManualIncomeExpectationForm } from "./ManualIncomeExpectationForm";
+import { budgetRefreshOutcome, completeManualIncomeExpectation, fetchAccounts, fetchIncomeExpectations, fetchTransactions, fetchWorkspaceOverview, SessionError, signIn, signOut, updateManualTransactionStatus, type WorkspaceOverviewResult } from "../lib/api";
 
-export function LiveDashboard({ currentPath = "/" }: { currentPath?: "/" | "/budget" }) {
+export function LiveDashboard({ currentPath = "/" }: { currentPath?: "/" | "/budget" | "/accounts" | "/transactions" | "/expectations" }) {
   const [result, setResult] = useState<WorkspaceOverviewResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -14,17 +17,62 @@ export function LiveDashboard({ currentPath = "/" }: { currentPath?: "/" | "/bud
   const [password, setPassword] = useState("");
   const requestId = useRef(0);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     const id = ++requestId.current;
-    const next = await fetchWorkspaceOverview();
+    let next = await fetchWorkspaceOverview(fetch, undefined, "AMD", 0, currentPath !== "/accounts");
+    if ((currentPath === "/accounts" || currentPath === "/transactions" || currentPath === "/expectations") && next.connectionState === "ready" && next.data) {
+      try {
+        const [accounts, recentTransactions, incomeExpectations] = await Promise.all([
+          currentPath === "/accounts" || currentPath === "/transactions" ? fetchAccounts() : Promise.resolve(next.data.accounts),
+          currentPath === "/transactions" ? fetchTransactions() : Promise.resolve(next.data.recentTransactions),
+          currentPath === "/expectations" ? fetchIncomeExpectations() : Promise.resolve(next.data.incomeExpectations),
+        ]);
+        next = { ...next, data: { ...next.data, accounts, recentTransactions, incomeExpectations } };
+      } catch (failure) {
+        next = failure instanceof SessionError && failure.status === 401
+          ? { connectionState: "unauthenticated", apiHealthy: true, data: null }
+          : { connectionState: "unavailable", apiHealthy: true, data: null };
+      }
+    }
     if (id === requestId.current) setResult(next);
+    return id === requestId.current ? next : null;
+  }, [currentPath]);
+
+  async function refreshAfterAccountSave(): Promise<boolean> {
+    const next = await refresh();
+    if (!next) return false;
+    if (next.connectionState !== "ready") {
+      setError("Account was created, but the account list could not be refreshed. Reload before making another change.");
+      return false;
+    }
+    setError("");
+    return true;
+  }
+
+  async function refreshAfterBudgetSave(): Promise<boolean> {
+    const next = await refresh();
+    if (!next) return false;
+    const outcome = budgetRefreshOutcome(next);
+    if (outcome !== "ready") {
+      setError(outcome === "expired"
+        ? "Settings were saved, but your session expired before the updated budget could be loaded. Sign in again."
+        : "Settings were saved, but the updated budget could not be loaded. Refresh the page before making another change.");
+      return false;
+    }
+    setError("");
+    return true;
+  }
+
+  async function retry() {
+    const next = await refresh();
+    if (next?.connectionState === "ready") setError("");
   }
 
   useEffect(() => {
     const pending = requestId;
     void refresh();
     return () => { pending.current++; };
-  }, []);
+  }, [refresh]);
 
   async function handleSignIn(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -76,7 +124,7 @@ export function LiveDashboard({ currentPath = "/" }: { currentPath?: "/" | "/bud
       {result?.connectionState === "unavailable" && (
         <section className="rounded-xl bg-amber-50 p-5">
           <p>Financial service is unavailable. Please try again.</p>
-          <button type="button" className="mt-3 underline" onClick={() => void refresh()}>Retry</button>
+          <button type="button" className="mt-3 underline" onClick={() => void retry()}>Retry</button>
           <button type="button" disabled={busy} className="ml-4 underline" onClick={() => void handleSignOut()}>Sign out</button>
         </section>
       )}
@@ -96,17 +144,102 @@ export function LiveDashboard({ currentPath = "/" }: { currentPath?: "/" | "/bud
       {ready && result.data && (
         <>
           <button type="button" disabled={busy} onClick={() => void handleSignOut()} className="rounded border border-slate-400 px-4 py-2 text-sm disabled:opacity-50">Sign out</button>
-          <FinancialBoundaryCards payload={result.data} />
-          <BudgetSection budget={result.data.budget} />
+          {currentPath === "/accounts" ? (
+            <>
+              <AccountsSection accounts={result.data.accounts} />
+              <ManualAccountForm busy={busy} onBusyChange={setBusy} onSaved={refreshAfterAccountSave} />
+            </>
+          ) : currentPath === "/transactions" ? (
+            <>
+              <TransactionsSection
+                transactions={result.data.recentTransactions}
+                busy={busy}
+                onStatusChange={async (id, status) => {
+                  setBusy(true);
+                  try {
+                    await updateManualTransactionStatus(id, status);
+                    const next = await refresh();
+                    if (next?.connectionState === "ready") {
+                      setError("");
+                      return true;
+                    }
+                    setError("Transaction status was updated, but refreshed data could not be loaded.");
+                    return false;
+                  } catch {
+                    setError("Transaction status could not be updated. Refresh the ledger before trying again.");
+                    return false;
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              />
+              <ManualTransactionForm
+                accounts={result.data.accounts}
+                busy={busy}
+                onBusyChange={setBusy}
+                onSaved={async () => {
+                  const next = await refresh();
+                  if (next?.connectionState === "ready") {
+                    setError("");
+                    return true;
+                  }
+                  setError("Transaction was saved, but updated data could not be loaded. Reload before making another change.");
+                  return false;
+                }}
+              />
+            </>
+          ) : currentPath === "/expectations" ? (
+            <>
+              <IncomeExpectationsSection
+                expectations={result.data.incomeExpectations}
+                busy={busy}
+                onComplete={async (id) => {
+                  setBusy(true);
+                  try {
+                    await completeManualIncomeExpectation(id);
+                    const next = await refresh();
+                    if (next?.connectionState === "ready") {
+                      setError("");
+                      return true;
+                    }
+                    setError("Expectation was completed, but updated data could not be loaded. Reload to verify its status.");
+                    return false;
+                  } catch {
+                    setError("Expectation could not be completed. Refresh the list before trying again.");
+                    return false;
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              />
+              <ManualIncomeExpectationForm
+                busy={busy}
+                onBusyChange={setBusy}
+                onSaved={async () => {
+                  const next = await refresh();
+                  if (next?.connectionState === "ready") {
+                    setError("");
+                    return true;
+                  }
+                  setError("Expectation was saved, but updated data could not be loaded. Reload before making another change.");
+                  return false;
+                }}
+              />
+            </>
+          ) : (
+            <>
+              <FinancialBoundaryCards payload={result.data} />
+              <BudgetSection budget={result.data.budget} />
+            </>
+          )}
           {currentPath === "/budget" && (
             <BudgetSettingsForm
               initial={result.data.budget?.settings}
               busy={busy}
               onBusyChange={setBusy}
-              onSaved={refresh}
+              onSaved={refreshAfterBudgetSave}
             />
           )}
-          <p className="text-sm text-slate-600">Account details, transactions, and income expectations are not connected to this dashboard yet.</p>
         </>
       )}
     </WorkspaceShell>

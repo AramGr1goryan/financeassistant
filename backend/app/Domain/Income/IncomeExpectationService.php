@@ -14,7 +14,7 @@ final class IncomeExpectationService
 {
     public function __construct(private readonly FinancialCalendar $calendar) {}
 
-    public function create(User $owner, string $description, Money $amount, string $expectedDate): IncomeExpectation
+    public function create(User $owner, string $description, Money $amount, string $expectedDate, ?string $id = null): IncomeExpectation
     {
         $description = trim($description);
 
@@ -40,6 +40,9 @@ final class IncomeExpectationService
             'expected_date' => $expectedDate,
             'status' => IncomeExpectationStatus::Planned,
         ]);
+        if ($id !== null) {
+            $expectation->id = $id;
+        }
         $expectation->owner()->associate($owner);
         $expectation->save();
 

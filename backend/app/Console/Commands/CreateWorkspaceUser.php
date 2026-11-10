@@ -2,10 +2,12 @@
 
 namespace App\Console\Commands;
 
+use App\Domain\Telegram\TelegramOwnerLinkService;
 use App\Models\User;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
 #[Signature('finance:create-user')]
@@ -54,7 +56,15 @@ class CreateWorkspaceUser extends Command
             return self::FAILURE;
         }
 
-        User::query()->create(['name' => $name, 'email' => $email, 'password' => $password]);
+        DB::transaction(function () use ($name, $email, $password): void {
+            $owner = User::query()->create(['name' => $name, 'email' => $email, 'password' => $password]);
+            $telegramOwnerId = app(TelegramOwnerLinkService::class)->configuredOwnerTelegramId();
+
+            if ($telegramOwnerId !== null) {
+                app(TelegramOwnerLinkService::class)->linkVerifiedOwner($owner, $telegramOwnerId);
+            }
+        });
+
         $this->info('Workspace user created.');
 
         return self::SUCCESS;

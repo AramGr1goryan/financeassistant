@@ -29,11 +29,12 @@ Work in verifiable phases. A phase is complete only when its code, focused tests
   - [ ] Validate production prerequisites and PostgreSQL against a disposable test database.
 - [x] Add an internal deterministic budget calculation using posted funds, pending outflows, and explicit assumptions.
 - [x] Persist owner-scoped budget assumption revisions and calculate against the current ledger.
-  - [ ] Add owner-scoped AMD assumption editing through the API and budget page; PostgreSQL and full browser verification remain pending.
+  - [ ] Add owner-scoped AMD assumption editing through the API and budget page; PostgreSQL verification remains pending.
+    - [x] Verify saving, recalculation, reload persistence, and two-owner isolation in a browser using an isolated SQLite database and synthetic users.
 - [x] Default the internal planning horizon to 30 days while allowing an explicit positive horizon.
 - [ ] Implement budget and conservative planning-horizon calculations.
-- [ ] Implement separately labelled manual income expectations; automated forecasts are deferred.
-  - [x] Add an owner-scoped internal service to save, list, and manually complete assumptions without changing the ledger or budget; API and UI remain pending.
+- [ ] Implement separately labelled manual income expectations; automated forecasts are deferred (PostgreSQL verification remains pending).
+  - [x] Add an owner-scoped API and live dashboard form to create, list, and complete assumptions without changing the ledger or budget; SQLite API/UI tests pass, PostgreSQL verification remains pending.
   - [x] Validate the new migration and constraints on the designated disposable PostgreSQL test database (user-reported complete suite: 63 passed, 232 assertions).
 - [ ] Implement Laravel authentication, owner-scoped authorization and isolated user workspaces before exposing financial APIs.
   - [x] Add an interactive terminal command to provision users without public registration or password arguments; test sign-in and failure cases on SQLite.
@@ -52,6 +53,8 @@ Work in verifiable phases. A phase is complete only when its code, focused tests
 
 - [x] Add owner-only, rate-limited, replay-safe webhook processing.
 - [x] Implement commands by calling existing financial application services.
+- [x] Deliver Telegram webhook command replies through the Bot API and retry failed deliveries without repeating command mutations.
+- [x] Link the configured Telegram owner ID while provisioning the initial workspace user.
 - [x] Add notification preferences and delivery deduplication tests.
 
 ## Phase 6 — AI assistance
@@ -62,6 +65,11 @@ Work in verifiable phases. A phase is complete only when its code, focused tests
 
 ## Phase 7 — Web dashboard
 
+- [ ] Enable manual AMD account creation and ledger-derived account listing; PostgreSQL verification remains pending.
+  - [x] Verify asset and credit account creation and reload persistence in a browser using isolated SQLite and synthetic data.
+- [x] Add owner-scoped manual transaction entry, ledger listing, and processor-validated lifecycle actions; SQLite API tests pass, and the entry/posting/balance flow was browser-verified against isolated fixtures.
+- [x] Connect owner-scoped manual income expectations and completion to the dashboard; keep assumptions separate from actual balances and budgets.
+  - [x] Verify creating and completing an expectation through the browser without changing the displayed ledger balance.
 - [x] Build responsive accessible dashboard and secondary pages.
 - [x] Integrate versioned API data; never ship unlabeled production demo figures.
 - [x] Add UI tests for key financial labels, empty states, and mobile layouts.
@@ -70,9 +78,10 @@ Work in verifiable phases. A phase is complete only when its code, focused tests
 
 - [ ] Complete scoped security review, performance checks, backups/restore test, monitoring, and deployment documentation.
   - [x] Document backup/restore verification procedures, monitoring endpoints, and scoped security controls in `docs/security.md`.
+- [ ] Deploy the Laravel API with PostgreSQL and the Vercel frontend; verify sign-in, owner-scoped manual finance workflows, and Telegram reply delivery end-to-end.
 - [x] Verify authorization, webhook protections, sensitive-data handling, and dependency checks.
 - [x] Report remaining provider, deployment, or operational limitations explicitly.
 
 ## Status
 
-The workspace began empty. Phase 1 foundations are in place, and the financial core subset of Phase 2 now has tested Money, account/category/transaction models, an atomic canonical import processor, ledger-derived balance summaries, and Yerevan day boundaries. SQLite verification passes. The user ran migrations and the complete test suite against a dedicated local PostgreSQL test database, including the PostgreSQL integrity and concurrent-import tests. Phase 2 is not complete: owner authentication, bank connections, transfer review, audit logging, and provider imports remain unimplemented. Docker Compose syntax is valid, but the Docker daemon was unavailable at initial setup, so service startup has not been exercised.
+The application now supports a manually operated AMD workflow: owner-scoped asset/credit accounts, transaction entry and lifecycle changes through the canonical processor, budget assumptions, and separately labelled expected income. The backend suite (123 passed, 4 skipped), frontend tests/lint/build, and local container health checks pass. The user ran migrations and the complete test suite against a dedicated local PostgreSQL test database for earlier financial-core changes, but the latest manual account, transaction, expectation, authentication, and Telegram delivery changes still need PostgreSQL validation. Prisma Postgres is attached to the Vercel project, and Production entries exist for `APP_KEY` and Telegram settings; Vercel flags the webhook secret as readable and its visibility must be changed to Sensitive. The project has no deployment or domain yet; migrations, initial owner setup, final PostgreSQL validation, account recovery, monitoring, and verified backups remain outstanding, so the production and PostgreSQL validation checklist items above remain incomplete. Bank integrations and automatic income forecasting are intentionally deferred.

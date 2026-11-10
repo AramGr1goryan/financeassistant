@@ -4,6 +4,7 @@ import {
   EmptyWorkspaceBanner,
 } from "../../components/FinancialSections";
 import { WorkspaceShell } from "../../components/WorkspaceShell";
+import { LiveDashboard } from "../../components/LiveDashboard";
 import type { AccountItemDto } from "../../lib/api";
 
 export function AccountsPageView({
@@ -25,6 +26,5 @@ export function AccountsPageView({
 }
 
 export default function AccountsPage() {
-  return <AccountsPageView />;
+  return <LiveDashboard currentPath="/accounts" />;
 }
-

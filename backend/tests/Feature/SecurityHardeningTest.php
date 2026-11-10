@@ -18,7 +18,10 @@ use App\Models\Account;
 use App\Models\Transaction;
 use App\Models\TransactionCategory;
 use App\Models\User;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class SecurityHardeningTest extends TestCase
@@ -27,6 +30,10 @@ class SecurityHardeningTest extends TestCase
 
     public function test_webhook_and_api_responses_never_disclose_secrets_or_tokens(): void
     {
+        Http::fake([
+            'api.telegram.org/*' => Http::response(['ok' => true], 200),
+        ]);
+
         $botToken = '999999:SUPER_SECRET_TELEGRAM_BOT_TOKEN';
         $webhookSecret = 'SUPER_SECRET_WEBHOOK_HEADER_VALUE';
 
@@ -71,8 +78,8 @@ class SecurityHardeningTest extends TestCase
 
     public function test_phase_five_and_six_migrations_emit_postgres_check_constraints(): void
     {
-        $previousConnection = \Illuminate\Support\Facades\DB::getDefaultConnection();
-        \Illuminate\Support\Facades\DB::setDefaultConnection('pgsql');
+        $previousConnection = DB::getDefaultConnection();
+        DB::setDefaultConnection('pgsql');
 
         try {
             foreach ([
@@ -81,13 +88,13 @@ class SecurityHardeningTest extends TestCase
                 '2026_11_08_020200_create_ai_category_suggestions_table.php' => 'ai_category_suggestions_values_check',
             ] as $filename => $expectedConstraint) {
                 $migration = require database_path('migrations/'.$filename);
-                $queries = \Illuminate\Support\Facades\DB::connection('pgsql')->pretend(fn () => $migration->up());
+                $queries = DB::connection('pgsql')->pretend(fn () => $migration->up());
                 $sql = implode("\n", array_column($queries, 'query'));
 
                 $this->assertStringContainsString($expectedConstraint, $sql, $filename);
             }
         } finally {
-            \Illuminate\Support\Facades\DB::setDefaultConnection($previousConnection);
+            DB::setDefaultConnection($previousConnection);
         }
     }
 
@@ -143,8 +150,7 @@ class SecurityHardeningTest extends TestCase
             }
         });
 
-        $this->expectException(\Illuminate\Database\Eloquent\ModelNotFoundException::class);
+        $this->expectException(ModelNotFoundException::class);
         app(AiAssistantService::class)->suggestCategory($ownerA, $txB);
     }
 }
-

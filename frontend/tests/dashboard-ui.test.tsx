@@ -8,8 +8,19 @@ import { ExpectationsPageView } from "../src/app/expectations/page";
 import { DashboardView } from "../src/app/page";
 import { TransactionsPageView } from "../src/app/transactions/page";
 import { BudgetSettingsForm } from "../src/components/BudgetSettingsForm";
+import { ManualAccountForm } from "../src/components/ManualAccountForm";
+import { ManualIncomeExpectationForm } from "../src/components/ManualIncomeExpectationForm";
+import { ManualTransactionForm } from "../src/components/ManualTransactionForm";
 import {
   type DashboardWorkspacePayload,
+  budgetRefreshOutcome,
+  createManualAccount,
+  createManualTransaction,
+  createManualIncomeExpectation,
+  completeManualIncomeExpectation,
+  fetchAccounts,
+  fetchIncomeExpectations,
+  fetchTransactions,
   fetchWorkspaceOverview,
   formatMoneyResource,
   resolveApiBaseUrl,
@@ -17,11 +28,150 @@ import {
   SessionError,
   signIn,
   signOut,
+  updateManualTransactionStatus,
 } from "../src/lib/api";
+
+test("manual transactions retain amount strings and use authenticated CSRF requests", async () => {
+  const calls: { url: string; init?: RequestInit }[] = [];
+  const fetcher: typeof fetch = async (input, init) => {
+    calls.push({ url: String(input), init });
+    if (String(input).endsWith("/csrf")) return new Response(null, { status: 204 });
+    if (init?.method === "POST") return Response.json({ data: { id: "tx-id" } }, { status: 201 });
+    return Response.json({ data: [{
+      id: "tx-id", account_id: "account-id", account_name: "Wallet",
+      amount: { minor_units: "9007199254740993", currency: "AMD", currency_exponent: 0 },
+      type: "INCOME", status: "POSTED", transaction_date: "2025-03-08",
+      description: "Salary", merchant: null, transfer_direction: null, is_generated_counterpart: false,
+    }] });
+  };
+  await createManualTransaction({
+    idempotency_key: "idempotency-id", account_id: "account-id",
+    amount_minor_units: "9007199254740993", type: "INCOME",
+    status: "POSTED", transaction_date: "2025-03-08",
+  }, fetcher, () => "XSRF-TOKEN=token");
+  assert.equal((calls[1].init?.headers as Record<string, string>)["X-XSRF-TOKEN"], "token");
+  assert.equal(JSON.parse(String(calls[1].init?.body)).amount_minor_units, "9007199254740993");
+  const transactions = await fetchTransactions(fetcher);
+  assert.equal(transactions[0].amountFormatted, "AMD 9,007,199,254,740,993");
+  assert.equal(transactions[0].accountName, "Wallet");
+  await assert.rejects(fetchTransactions(async () => new Response(null, { status: 500 })), /Transactions could not be loaded/);
+});
+
+test("manual transaction lifecycle actions use the protected status endpoint", async () => {
+  const calls: { url: string; init?: RequestInit }[] = [];
+  const fetcher: typeof fetch = async (input, init) => {
+    calls.push({ url: String(input), init });
+    return new Response(null, { status: 204 });
+  };
+  await updateManualTransactionStatus("transaction-id", "POSTED", fetcher, () => "XSRF-TOKEN=token");
+  assert.equal(calls[1].url, "/api/v1/transactions/transaction-id/status");
+  assert.equal(calls[1].init?.method, "POST");
+  assert.equal(JSON.parse(String(calls[1].init?.body)).status, "POSTED");
+});
+
+test("manual income expectations preserve integer precision and use owner-scoped CSRF endpoints", async () => {
+  const calls: { url: string; init?: RequestInit }[] = [];
+  const fetcher: typeof fetch = async (input, init) => {
+    calls.push({ url: String(input), init });
+    if (String(input).endsWith("/csrf")) return new Response(null, { status: 204 });
+    if (init?.method === "POST") return Response.json({ data: { id: "expectation-id" } }, { status: 201 });
+    return Response.json({ data: [{
+      id: "expectation-id", description: "Salary",
+      amount: { minor_units: "9007199254740993", currency: "AMD", currency_exponent: 0 },
+      expected_date: "2025-03-08", status: "PLANNED",
+    }] });
+  };
+  await createManualIncomeExpectation({
+    id: "expectation-id", description: "Salary",
+    amount_minor_units: "9007199254740993", expected_date: "2025-03-08",
+  }, fetcher, () => "XSRF-TOKEN=token");
+  assert.equal((calls[1].init?.headers as Record<string, string>)["X-XSRF-TOKEN"], "token");
+  assert.equal(JSON.parse(String(calls[1].init?.body)).amount_minor_units, "9007199254740993");
+  const expectations = await fetchIncomeExpectations(fetcher);
+  assert.equal(expectations[0].amountFormatted, "AMD 9,007,199,254,740,993");
+  await completeManualIncomeExpectation("expectation-id", fetcher, () => "XSRF-TOKEN=token");
+  assert.equal(calls.at(-1)?.url, "/api/v1/income-expectations/expectation-id/complete");
+  assert.equal(calls.at(-1)?.init?.method, "POST");
+});
+
+test("manual transaction form requires an account and distinguishes transfer fields", () => {
+  const html = renderToStaticMarkup(
+    <ManualTransactionForm
+      accounts={[{
+        id: "account-id", name: "Wallet", type: "ASSET", currency: "AMD",
+        postedBalanceFormatted: "AMD 0", pendingChangeFormatted: "AMD 0",
+        creditLiabilityFormatted: "AMD 0", isActive: true,
+      }]}
+      busy={false}
+      onBusyChange={() => {}}
+      onSaved={async () => true}
+    />,
+  );
+  assert.match(html, /Add a manual transaction/);
+  assert.match(html, /integer AMD units/);
+  assert.match(html, /Financial date \(Yerevan\)/);
+});
+
+test("manual income expectation form labels assumptions and excludes them from current money", () => {
+  const html = renderToStaticMarkup(
+    <ManualIncomeExpectationForm busy={false} onBusyChange={() => {}} onSaved={async () => true} />,
+  );
+  assert.match(html, /Add an expected income/);
+  assert.match(html, /manual assumption only/);
+  assert.match(html, /whole AMD/);
+});
+
+test("manual accounts retain integer precision and use authenticated CSRF requests", async () => {
+  const calls: { url: string; init?: RequestInit }[] = [];
+  const account = { id: "c5512aad-4e31-4f66-8865-f9e2f5c087bd", name: "Bank", type: "ASSET" as const, opening_balance: "9007199254740993" };
+  const fetcher: typeof fetch = async (input, init) => {
+    calls.push({ url: String(input), init });
+    if (String(input).endsWith("/csrf")) return new Response(null, { status: 204 });
+    if (init?.method === "POST") return Response.json({ data: { id: account.id } }, { status: 201 });
+    const money = { minor_units: "9007199254740993", currency: "AMD", currency_exponent: 0 };
+    return Response.json({ data: [{ id: account.id, name: "Bank", type: "ASSET", is_active: true,
+      posted_balance: money, pending_change: money, credit_liability: money }] });
+  };
+  await createManualAccount(account, fetcher, () => "XSRF-TOKEN=token");
+  assert.equal((calls[1].init?.headers as Record<string, string>)["X-XSRF-TOKEN"], "token");
+  assert.equal(JSON.parse(String(calls[1].init?.body)).opening_balance, "9007199254740993");
+  assert.equal((await fetchAccounts(fetcher))[0].postedBalanceFormatted, "AMD 9,007,199,254,740,993");
+  await assert.rejects(fetchAccounts(async () => new Response(null, { status: 500 })), /Accounts could not be loaded/);
+});
+
+test("manual account form requires an explicitly entered opening balance and distinguishes credit", () => {
+  const html = renderToStaticMarkup(
+    <ManualAccountForm busy={false} onBusyChange={() => {}} onSaved={async () => true} />,
+  );
+  assert.match(html, /Add a manual account/);
+  assert.match(html, /Opening owned balance \(AMD\)/);
+  assert.match(html, /Credit liability/);
+  assert.doesNotMatch(html, /value="0"/);
+  assert.match(html, /does not connect to a bank/);
+});
+
+test("saved budget is confirmed only when its updated data is available", () => {
+  assert.equal(budgetRefreshOutcome({ connectionState: "unavailable", apiHealthy: false, data: null }), "unavailable");
+  assert.equal(budgetRefreshOutcome({ connectionState: "unauthenticated", apiHealthy: true, data: null }), "expired");
+  const data: DashboardWorkspacePayload = {
+    balance: {
+      currency: "AMD", postedOwnedFundsFormatted: "AMD 0", pendingOwnedFundsChangeFormatted: "AMD 0",
+      pendingOwnedFundsOutflowsFormatted: "AMD 0", creditLiabilitiesFormatted: "AMD 0",
+      pendingCreditLiabilityChangeFormatted: "AMD 0",
+    },
+    budget: null, accounts: [], recentTransactions: [], incomeExpectations: [],
+  };
+  assert.equal(budgetRefreshOutcome({ connectionState: "ready", apiHealthy: true, data }), "unavailable");
+  data.budget = {
+    currency: "AMD", planningDays: 30, availableFundsFormatted: "AMD 0", dailyLimitFormatted: "AMD 0",
+    mandatoryPaymentsFormatted: "AMD 0", protectedReserveFormatted: "AMD 0", allocatedSavingsFormatted: "AMD 0",
+  };
+  assert.equal(budgetRefreshOutcome({ connectionState: "ready", apiHealthy: true, data }), "ready");
+});
 
 test("budget settings form displays explicit AMD assumptions without fabricated defaults", () => {
   const html = renderToStaticMarkup(
-    <BudgetSettingsForm busy={false} onBusyChange={() => {}} onSaved={async () => {}} />,
+    <BudgetSettingsForm busy={false} onBusyChange={() => {}} onSaved={async () => true} />,
   );
   assert.match(html, /Mandatory payments \(AMD\)/);
   assert.match(html, /Protected reserve \(AMD\)/);
@@ -31,7 +181,7 @@ test("budget settings form displays explicit AMD assumptions without fabricated 
   const populated = renderToStaticMarkup(
     <BudgetSettingsForm initial={{
       mandatory_payments: "9007199254740993", protected_reserve: "0", allocated_savings: "123", planning_days: 30,
-    }} busy={false} onBusyChange={() => {}} onSaved={async () => {}} />,
+    }} busy={false} onBusyChange={() => {}} onSaved={async () => true} />,
   );
   assert.match(populated, /value="9007199254740993"/);
   assert.match(populated, /value="30"/);
@@ -180,6 +330,7 @@ test("dashboard and secondary pages keep posted, pending, credit liability, and 
     recentTransactions: [
       {
         id: "tx-1",
+        accountId: "acc-1",
         accountName: "Primary Checking",
         type: "EXPENSE",
         status: "PENDING",
@@ -187,9 +338,12 @@ test("dashboard and secondary pages keep posted, pending, credit liability, and 
         yerevanDate: "2026-03-11",
         description: "Utility hold",
         merchant: "Electric Co",
+        transferDirection: null,
+        isGeneratedCounterpart: false,
       },
       {
         id: "tx-2",
+        accountId: "acc-2",
         accountName: "Credit Card",
         type: "EXPENSE",
         status: "POSTED",
@@ -197,6 +351,8 @@ test("dashboard and secondary pages keep posted, pending, credit liability, and 
         yerevanDate: "2026-03-10",
         description: "Pharmacy",
         merchant: "Pharmacy",
+        transferDirection: null,
+        isGeneratedCounterpart: false,
       },
     ],
     incomeExpectations: [

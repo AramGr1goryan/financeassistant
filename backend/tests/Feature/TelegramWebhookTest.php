@@ -18,6 +18,9 @@ use App\Models\TelegramWebhookUpdate;
 use App\Models\Transaction;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Factory;
+use Illuminate\Http\Client\Request as HttpRequest;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class TelegramWebhookTest extends TestCase
@@ -35,7 +38,12 @@ class TelegramWebhookTest extends TestCase
         config([
             'services.telegram.webhook_secret' => self::WEBHOOK_SECRET,
             'services.telegram.owner_id' => self::OWNER_TELEGRAM_ID,
+            'services.telegram.bot_token' => 'test-bot-token',
             'services.telegram.rate_limit_per_minute' => 30,
+        ]);
+
+        Http::fake([
+            'api.telegram.org/*' => Http::response(['ok' => true], 200),
         ]);
     }
 
@@ -154,6 +162,57 @@ class TelegramWebhookTest extends TestCase
         $this->assertSame($first->json('reply_text'), $second->json('reply_text'));
         $this->assertSame(1, BudgetSetting::query()->where('owner_id', $owner->id)->count());
         $this->assertSame(1, TelegramWebhookUpdate::query()->count());
+        Http::assertSentCount(2);
+    }
+
+    public function test_sends_command_reply_to_the_authorized_private_chat(): void
+    {
+        $this->createLinkedOwner();
+
+        $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $this->updatePayload(450, '/help'))
+            ->assertOk()
+            ->assertJsonPath('status', 'processed');
+
+        Http::assertSent(fn (HttpRequest $request): bool => $request->url() === 'https://api.telegram.org/bottest-bot-token/sendMessage'
+            && $request->data()['chat_id'] === self::OWNER_TELEGRAM_ID
+            && $request->data()['text'] !== '');
+    }
+
+    public function test_delivery_failure_returns_a_retryable_error_and_duplicate_updates_retry_delivery(): void
+    {
+        $this->createLinkedOwner();
+        Http::swap(new Factory);
+        Http::fake([
+            'api.telegram.org/*' => Http::sequence()
+                ->push(['ok' => false], 503)
+                ->push(['ok' => true], 200),
+        ]);
+        $payload = $this->updatePayload(451, '/help');
+
+        $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $payload)
+            ->assertStatus(503)
+            ->assertExactJson(['message' => 'Telegram reply delivery failed.']);
+
+        $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $payload)
+            ->assertOk()
+            ->assertJsonPath('status', 'duplicate');
+
+        Http::assertSentCount(2);
+        $this->assertSame(1, TelegramWebhookUpdate::query()->where('update_id', 451)->count());
+    }
+
+    public function test_missing_bot_token_fails_delivery_without_exposing_credentials(): void
+    {
+        $this->createLinkedOwner();
+        config(['services.telegram.bot_token' => '']);
+
+        $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $this->updatePayload(452, '/help'))
+            ->assertStatus(503)
+            ->assertExactJson(['message' => 'Telegram reply delivery failed.']);
     }
 
     public function test_rate_limits_webhook_requests(): void

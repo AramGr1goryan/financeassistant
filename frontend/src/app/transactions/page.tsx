@@ -4,6 +4,7 @@ import {
   TransactionsSection,
 } from "../../components/FinancialSections";
 import { WorkspaceShell } from "../../components/WorkspaceShell";
+import { LiveDashboard } from "../../components/LiveDashboard";
 import type { TransactionItemDto } from "../../lib/api";
 
 export function TransactionsPageView({
@@ -27,6 +28,5 @@ export function TransactionsPageView({
 }
 
 export default function TransactionsPage() {
-  return <TransactionsPageView />;
+  return <LiveDashboard currentPath="/transactions" />;
 }
-

@@ -169,6 +169,7 @@ export function AccountsSection({ accounts }: { accounts: AccountItemDto[] }) {
                   {account.type}
                 </span>
               </div>
+              {!account.isActive && <p className="mt-1 text-xs text-slate-600">Inactive</p>}
               <dl className="mt-3 space-y-1 text-xs text-slate-600">
                 <div className="flex justify-between">
                   <dt>Posted balance:</dt>
@@ -177,7 +178,7 @@ export function AccountsSection({ accounts }: { accounts: AccountItemDto[] }) {
                   </dd>
                 </div>
                 <div className="flex justify-between">
-                  <dt>Pending change:</dt>
+                  <dt>{account.type === "CREDIT" ? "Pending liability change:" : "Pending change:"}</dt>
                   <dd className="font-medium text-slate-900">
                     {account.pendingChangeFormatted}
                   </dd>
@@ -199,8 +200,12 @@ export function AccountsSection({ accounts }: { accounts: AccountItemDto[] }) {
 
 export function TransactionsSection({
   transactions,
+  busy = false,
+  onStatusChange,
 }: {
   transactions: TransactionItemDto[];
+  busy?: boolean;
+  onStatusChange?: (id: string, status: "POSTED" | "REVERSED" | "DECLINED") => Promise<boolean>;
 }) {
   return (
     <section
@@ -230,10 +235,12 @@ export function TransactionsSection({
             <thead>
               <tr className="text-slate-500">
                 <th className="py-2 pr-4 font-medium">Date (Asia/Yerevan)</th>
+                <th className="py-2 pr-4 font-medium">Account</th>
                 <th className="py-2 pr-4 font-medium">Description</th>
                 <th className="py-2 pr-4 font-medium">Type</th>
                 <th className="py-2 pr-4 font-medium">Status</th>
                 <th className="py-2 font-medium">Amount</th>
+                <th className="py-2 pl-4 font-medium">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -242,6 +249,7 @@ export function TransactionsSection({
                   <td className="py-2.5 pr-4 text-slate-600">
                     {tx.yerevanDate}
                   </td>
+                  <td className="py-2.5 pr-4 text-slate-700">{tx.accountName}</td>
                   <td className="py-2.5 pr-4 font-medium text-slate-900">
                     {tx.description}
                   </td>
@@ -253,6 +261,17 @@ export function TransactionsSection({
                   </td>
                   <td className="py-2.5 font-semibold text-slate-900">
                     {tx.amountFormatted}
+                  </td>
+                  <td className="py-2.5 pl-4">
+                    {onStatusChange && !tx.isGeneratedCounterpart && tx.status === "PENDING" && (
+                      <div className="flex gap-2">
+                        <button type="button" disabled={busy} onClick={() => void onStatusChange(tx.id, "POSTED")} className="text-xs font-medium text-emerald-800 underline disabled:opacity-50">Mark posted</button>
+                        <button type="button" disabled={busy} onClick={() => void onStatusChange(tx.id, "DECLINED")} className="text-xs font-medium text-slate-600 underline disabled:opacity-50">Decline</button>
+                      </div>
+                    )}
+                    {onStatusChange && !tx.isGeneratedCounterpart && tx.status === "POSTED" && (
+                      <button type="button" disabled={busy} onClick={() => void onStatusChange(tx.id, "REVERSED")} className="text-xs font-medium text-red-700 underline disabled:opacity-50">Reverse</button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -321,8 +340,12 @@ export function BudgetSection({ budget }: { budget: BudgetSummaryDto | null }) {
 
 export function IncomeExpectationsSection({
   expectations,
+  busy = false,
+  onComplete,
 }: {
   expectations: IncomeExpectationDto[];
+  busy?: boolean;
+  onComplete?: (id: string) => Promise<boolean>;
 }) {
   return (
     <section
@@ -372,6 +395,16 @@ export function IncomeExpectationsSection({
                 <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
                   {item.status}
                 </span>
+                {item.status === "PLANNED" && onComplete && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void onComplete(item.id)}
+                    className="rounded border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 disabled:opacity-50"
+                  >
+                    Mark completed
+                  </button>
+                )}
               </div>
             </li>
           ))}

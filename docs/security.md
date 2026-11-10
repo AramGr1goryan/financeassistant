@@ -26,6 +26,7 @@ The application serves one owner. Treat all API requests, Telegram updates, impo
 - Validate Telegram webhook secret tokens using constant-time comparison.
 - Bind the configured owner Telegram identity and reject all others before command execution.
 - Rate-limit updates, deduplicate/replay-protect update IDs, validate payload shape, and make processing idempotent.
+- Deliver replies through Telegram's Bot API after command processing; delivery failures return a retryable response without logging the bot token or raw payload.
 - Bank integrations are read-only. Implement only officially documented capabilities with required user consent; never bypass bank authentication using browser automation.
 - AI output is untrusted and may not execute SQL, authorize actions, or mutate posted financial records.
 
@@ -49,7 +50,8 @@ Before production, define key rotation, secret revocation, backup retention and 
 
 ### Current operational limitations
 
-- Session-backed read-only `/api/v1/balance` and `/api/v1/budget` endpoints and `/api/v1/session` sign-in/sign-out are available; REST write endpoints for budget settings, manual income expectations, account management, and transaction listings remain pending, and same-origin reverse-proxy/PostgreSQL verification is required before production use.
+- Session-backed owner-scoped endpoints for balance, budget, accounts, transactions, and manual income expectations, plus `/api/v1/session` sign-in/sign-out, are implemented. PostgreSQL verification and end-to-end verification through the deployed same-origin frontend proxy are still required before production use.
+- Production still requires a public Laravel host, PostgreSQL, secure environment configuration, and a Telegram bot token, webhook secret, and pre-authorized owner ID. The interactive `finance:create-user` command creates the initial owner and links the configured private Telegram ID when provided.
 - Ameriabank and IDBank personal-account API capabilities and consent requirements have not been verified in Phase 4; no live bank adapter is enabled.
 - Live AI provider credentials are not configured; `NullAiAssistantProvider` fails closed by default unless an approved provider implementation is bound.
 - Docker daemon startup and live production backup/restore drills have not been executed in this workspace.
