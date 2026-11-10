@@ -20,4 +20,14 @@ class FinanceConfigTest extends TestCase
         $this->assertArrayNotHasKey('timezone', $connection);
         $this->assertArrayNotHasKey('search_path', $connection);
     }
+
+    public function test_postgres_direct_connection_uses_the_unpooled_database_url(): void
+    {
+        $connection = config('database.connections.pgsql_direct');
+
+        $this->assertSame('pgsql', $connection['driver']);
+        $this->assertSame(env('DATABASE_URL'), $connection['url']);
+        $this->assertArrayNotHasKey('timezone', $connection);
+        $this->assertArrayNotHasKey('search_path', $connection);
+    }
 }
