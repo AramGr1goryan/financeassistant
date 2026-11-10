@@ -86,6 +86,7 @@ return [
 
         'pgsql' => [
             'driver' => 'pgsql',
+            // Prisma's pooled endpoint uses transaction pooling; avoid session-level SET commands.
             'url' => env('DB_URL') ?: env('DATABASE_URL_POOLED') ?: env('DATABASE_URL'),
             'host' => env('DB_HOST', '127.0.0.1'),
             'port' => env('DB_PORT', '5432'),
@@ -95,9 +96,7 @@ return [
             'charset' => env('DB_CHARSET', 'utf8'),
             'prefix' => '',
             'prefix_indexes' => true,
-            'search_path' => 'public',
             'sslmode' => env('DB_SSLMODE', 'prefer'),
-            'timezone' => 'UTC',
         ],
 
         'sqlsrv' => [

@@ -12,4 +12,12 @@ class FinanceConfigTest extends TestCase
         $this->assertSame('Asia/Yerevan', config('finance.display_timezone'));
         $this->assertSame('UTC', config('app.timezone'));
     }
+
+    public function test_postgres_connection_avoids_session_level_initialization_for_transaction_pooling(): void
+    {
+        $connection = config('database.connections.pgsql');
+
+        $this->assertArrayNotHasKey('timezone', $connection);
+        $this->assertArrayNotHasKey('search_path', $connection);
+    }
 }
