@@ -40,3 +40,4 @@ Thumbs.db
 /frontend/out/
 /frontend/coverage/
 /frontend/.turbo/
+.vercel
