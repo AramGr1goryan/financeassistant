@@ -24,6 +24,9 @@ The codebase is organized around Accounts, Banking Integrations, Transactions, C
 Cross-cutting rules:
 
 - Controllers and Telegram handlers validate/authorize requests, invoke application actions, and shape responses. They do not contain business calculations.
+- Telegram `/widget` sends a Bot API 10.4 widget with owner-only balance, budget, and accounts queries. `/app` opens the dashboard as a Telegram Web App. When opened inside Telegram, signed `initData` is verified on the server using HMAC-SHA256 (`WebAppData` key) and a 24-hour expiration window, authorizing the verified owner session. Outside Telegram or without signed `initData`, the dashboard requires standard email and password authentication.
+- Telegram chat commands (`/accounts`, `/create_account`, `/transactions`, `/expense`, `/income`, `/transfer`, `/post_tx`, `/reverse_tx`, `/balance`, `/budget`, `/set_budget`, `/expected_income`, `/expect_income`, `/complete_expected_income`, `/notifications`) allow complete manual finance management with integer precision (AMD minor units), strict owner authorization, and idempotency protection.
+- In-message Bot API 10.4 widgets execute inside Telegram's sandboxed environment without network access, using `TelegramWidget.request()` to query the backend via `widget_query` and receive compact answers up to 1024 bytes via `answerWidgetQuery`. Production delivery is restricted to private chats with the pre-authorized owner.
 - Domain services own deterministic financial rules and should be independently testable.
 - DTOs define validated boundaries for imports, provider responses, and API responses.
 - Jobs handle synchronization, imports, and scheduled evaluation; events/listeners connect committed domain changes to downstream work.

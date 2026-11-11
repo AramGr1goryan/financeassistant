@@ -56,6 +56,7 @@ final class TelegramWebhookProcessor
                     chatId: $existing->telegram_chat_id,
                     command: $existing->command,
                     replyText: $existing->response_text,
+                    widgetQueryId: $validated['widget_query_id'],
                 );
             }
 
@@ -84,6 +85,7 @@ final class TelegramWebhookProcessor
                         chatId: $duplicate->telegram_chat_id,
                         command: $duplicate->command,
                         replyText: $duplicate->response_text,
+                        widgetQueryId: $validated['widget_query_id'],
                     );
                 }
 
@@ -96,6 +98,7 @@ final class TelegramWebhookProcessor
                 chatId: $record->telegram_chat_id,
                 command: $record->command,
                 replyText: $record->response_text,
+                widgetQueryId: $validated['widget_query_id'],
             );
         });
     }
@@ -107,7 +110,8 @@ final class TelegramWebhookProcessor
      *     telegram_user_id: int,
      *     telegram_chat_id: int,
      *     chat_type: string,
-     *     text: string
+     *     text: string,
+     *     widget_query_id: ?string
      * }
      */
     private function validatePayload(array $payload): array
@@ -116,6 +120,10 @@ final class TelegramWebhookProcessor
 
         if (! is_int($updateId) || $updateId <= 0) {
             throw new TelegramPayloadException('Telegram update_id must be a positive integer.');
+        }
+
+        if (array_key_exists('widget_query', $payload)) {
+            return $this->validateWidgetQuery($updateId, $payload['widget_query']);
         }
 
         $message = $payload['message'] ?? null;
@@ -150,7 +158,45 @@ final class TelegramWebhookProcessor
             'telegram_chat_id' => $chat['id'],
             'chat_type' => $chat['type'],
             'text' => $text,
+            'widget_query_id' => null,
+        ];
+    }
+
+    /**
+     * @return array{update_id: int, telegram_user_id: int, telegram_chat_id: int, chat_type: string, text: string, widget_query_id: string}
+     */
+    private function validateWidgetQuery(int $updateId, mixed $query): array
+    {
+        if (! is_array($query)
+            || ! is_string($query['id'] ?? null)
+            || $query['id'] === ''
+            || ! is_array($query['from'] ?? null)
+            || ! is_int($query['from']['id'] ?? null)
+            || $query['from']['id'] <= 0
+            || ($query['from']['is_bot'] ?? false) === true
+            || ! is_array($query['chat'] ?? null)
+            || ! is_int($query['chat']['id'] ?? null)
+            || ! is_string($query['chat']['type'] ?? null)
+            || ! is_array($query['type'] ?? null)
+            || ($query['type']['type'] ?? null) !== 'data'
+            || ! is_string($query['data'] ?? null)) {
+            throw new TelegramPayloadException('Invalid Telegram widget query.');
+        }
+
+        $command = match ($query['data']) {
+            'balance' => '/balance',
+            'budget' => '/budget',
+            'accounts' => '/accounts',
+            default => throw new TelegramPayloadException('Unsupported Telegram widget action.'),
+        };
+
+        return [
+            'update_id' => $updateId,
+            'telegram_user_id' => $query['from']['id'],
+            'telegram_chat_id' => $query['chat']['id'],
+            'chat_type' => $query['chat']['type'],
+            'text' => $command,
+            'widget_query_id' => $query['id'],
         ];
     }
 }
-

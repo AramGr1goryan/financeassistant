@@ -56,6 +56,12 @@ Work in verifiable phases. A phase is complete only when its code, focused tests
 - [x] Deliver Telegram webhook command replies through the Bot API and retry failed deliveries without repeating command mutations.
 - [x] Link the configured Telegram owner ID while provisioning the initial workspace user.
 - [x] Add notification preferences and delivery deduplication tests.
+- [x] Complete Telegram Bot API 10.4 widgets and manual-finance workflows.
+  - [x] Add owner-only private-chat balance, budget, and accounts widget queries, with replay protection and Telegram size-limit tests.
+  - [x] Add an `/app` button opening the dashboard as a Telegram Web App with server-side `initData` HMAC-SHA256 signature verification and fallback to standard credentials.
+  - [x] Implement and test complete account and transaction entry through chat (`/accounts`, `/create_account`, `/transactions`, `/expense`, `/income`, `/transfer`, `/post_tx`, `/reverse_tx`).
+  - [x] Provide safe owner linking for existing production users via database migration, session login auto-linking, and `POST /api/v1/telegram/link-owner`.
+  - [x] Provide automated container startup webhook registration including `widget_query` via `backend/docker-entrypoint.sh` and management API/artisan commands.
 
 ## Phase 6 — AI assistance
 

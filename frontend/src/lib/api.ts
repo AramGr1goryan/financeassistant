@@ -561,3 +561,110 @@ export function signIn(email: string, password: string, fetcher?: typeof fetch, 
 export function signOut(fetcher?: typeof fetch, readCookie?: () => string): Promise<void> {
   return sessionRequest("DELETE", undefined, fetcher, readCookie);
 }
+
+export interface TelegramOwnerStatusDto {
+  isLinked: boolean;
+  configuredIdSet: boolean;
+  telegramUserId: number | null;
+  verifiedAt: string | null;
+}
+
+export async function fetchTelegramOwnerStatus(
+  fetcher: typeof fetch = fetch,
+): Promise<TelegramOwnerStatusDto> {
+  const response = await fetcher("/api/v1/telegram/owner-status", {
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw new SessionError(response.status, "Could not fetch Telegram link status.");
+  const body = await response.json();
+  return {
+    isLinked: Boolean(body.is_linked),
+    configuredIdSet: Boolean(body.configured_id_set),
+    telegramUserId: body.telegram_user_id ?? null,
+    verifiedAt: body.verified_at ?? null,
+  };
+}
+
+export async function linkTelegramOwner(
+  fetcher: typeof fetch = fetch,
+  readCookie: () => string = () => document.cookie,
+): Promise<void> {
+  const token = await initializeCsrf(fetcher, readCookie);
+  const response = await fetcher("/api/v1/telegram/link-owner", {
+    method: "POST",
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "X-XSRF-TOKEN": token,
+    },
+  });
+  if (!response.ok) throw new SessionError(response.status, "Could not link Telegram account.");
+}
+
+export async function authenticateWithTelegramInitData(
+  initData: string,
+  fetcher: typeof fetch = fetch,
+  readCookie: () => string = () => document.cookie,
+): Promise<void> {
+  const token = await initializeCsrf(fetcher, readCookie);
+  const response = await fetcher("/api/v1/telegram/auth", {
+    method: "POST",
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "X-XSRF-TOKEN": token,
+    },
+    body: JSON.stringify({ init_data: initData }),
+  });
+  if (!response.ok) throw new SessionError(response.status, "Telegram authentication failed.");
+}
+
+export async function registerTelegramWebhook(
+  fetcher: typeof fetch = fetch,
+  readCookie: () => string = () => document.cookie,
+): Promise<void> {
+  const token = await initializeCsrf(fetcher, readCookie);
+  const response = await fetcher("/api/v1/telegram/register-webhook", {
+    method: "POST",
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "X-XSRF-TOKEN": token,
+    },
+  });
+  if (!response.ok) throw new SessionError(response.status, "Could not register Telegram webhook.");
+}
+
+export async function updateUserPassword(
+  currentPassword: string,
+  newPassword: string,
+  confirmation: string,
+  fetcher: typeof fetch = fetch,
+  readCookie: () => string = () => document.cookie,
+): Promise<void> {
+  const token = await initializeCsrf(fetcher, readCookie);
+  const response = await fetcher("/api/v1/user/password", {
+    method: "PUT",
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "X-XSRF-TOKEN": token,
+    },
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword,
+      new_password_confirmation: confirmation,
+    }),
+  });
+  if (!response.ok) throw new SessionError(response.status, "Could not update password.");
+}

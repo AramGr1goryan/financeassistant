@@ -13,6 +13,7 @@ import { ManualIncomeExpectationForm } from "../src/components/ManualIncomeExpec
 import { ManualTransactionForm } from "../src/components/ManualTransactionForm";
 import {
   type DashboardWorkspacePayload,
+  authenticateWithTelegramInitData,
   budgetRefreshOutcome,
   createManualAccount,
   createManualTransaction,
@@ -20,16 +21,21 @@ import {
   completeManualIncomeExpectation,
   fetchAccounts,
   fetchIncomeExpectations,
+  fetchTelegramOwnerStatus,
   fetchTransactions,
   fetchWorkspaceOverview,
   formatMoneyResource,
+  linkTelegramOwner,
+  registerTelegramWebhook,
   resolveApiBaseUrl,
   saveBudgetSettings,
   SessionError,
   signIn,
   signOut,
   updateManualTransactionStatus,
+  updateUserPassword,
 } from "../src/lib/api";
+import { SecurityAndTelegramSection } from "../src/components/SecurityAndTelegramSection";
 
 test("manual transactions retain amount strings and use authenticated CSRF requests", async () => {
   const calls: { url: string; init?: RequestInit }[] = [];
@@ -539,3 +545,49 @@ test("versioned /api/v1 balance and budget responses are formatted losslessly an
   assert.equal(readyResult.data?.budget?.dailyLimitFormatted, "AMD 8,300");
   assert.equal(readyResult.data?.budget?.planningDays, 10);
 });
+
+test("telegram initData authentication and owner management use secure endpoints", async () => {
+  const calls: { url: string; init?: RequestInit }[] = [];
+  const fetcher: typeof fetch = async (input, init) => {
+    calls.push({ url: String(input), init });
+    if (String(input).endsWith("/csrf")) return new Response(null, { status: 204 });
+    if (String(input).endsWith("/telegram/auth")) return Response.json({ authenticated: true }, { status: 200 });
+    if (String(input).endsWith("/telegram/owner-status")) {
+      return Response.json({ is_linked: true, configured_id_set: true, telegram_user_id: 123456789, verified_at: "2026-11-11T12:00:00Z" });
+    }
+    if (String(input).endsWith("/telegram/link-owner")) return Response.json({ message: "Linked" }, { status: 200 });
+    if (String(input).endsWith("/telegram/register-webhook")) return Response.json({ message: "Registered" }, { status: 200 });
+    if (String(input).endsWith("/user/password")) return Response.json({ message: "Updated" }, { status: 200 });
+    return new Response(null, { status: 404 });
+  };
+
+  // 1. authenticateWithTelegramInitData
+  await authenticateWithTelegramInitData("auth_date=123&hash=abc", fetcher, () => "XSRF-TOKEN=token");
+  assert.equal(calls[1].url, "/api/v1/telegram/auth");
+  assert.equal(JSON.parse(String(calls[1].init?.body)).init_data, "auth_date=123&hash=abc");
+
+  // 2. fetchTelegramOwnerStatus
+  const status = await fetchTelegramOwnerStatus(fetcher);
+  assert.equal(status.isLinked, true);
+  assert.equal(status.telegramUserId, 123456789);
+
+  // 3. linkTelegramOwner
+  await linkTelegramOwner(fetcher, () => "XSRF-TOKEN=token");
+  assert.equal(calls.at(-1)?.url, "/api/v1/telegram/link-owner");
+
+  // 4. registerTelegramWebhook
+  await registerTelegramWebhook(fetcher, () => "XSRF-TOKEN=token");
+  assert.equal(calls.at(-1)?.url, "/api/v1/telegram/register-webhook");
+
+  // 5. updateUserPassword
+  await updateUserPassword("old-pwd-123456", "new-pwd-123456", "new-pwd-123456", fetcher, () => "XSRF-TOKEN=token");
+  assert.equal(calls.at(-1)?.url, "/api/v1/user/password");
+  assert.equal(calls.at(-1)?.init?.method, "PUT");
+  assert.equal(JSON.parse(String(calls.at(-1)?.init?.body)).current_password, "old-pwd-123456");
+
+  // 6. SecurityAndTelegramSection renders
+  const html = renderToStaticMarkup(<SecurityAndTelegramSection busy={false} onBusyChange={() => {}} />);
+  assert.ok(html.includes("Telegram Bot Integration"));
+  assert.ok(html.includes("Change Password"));
+});
+

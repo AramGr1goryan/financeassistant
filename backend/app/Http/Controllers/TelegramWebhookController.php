@@ -34,7 +34,15 @@ final class TelegramWebhookController extends Controller
         }
 
         try {
-            $telegram->sendMessage($result->chatId, $result->replyText);
+            if ($result->widgetQueryId !== null) {
+                $telegram->answerWidgetQuery($result->widgetQueryId, $result->replyText);
+            } elseif ($result->command === '/widget') {
+                $telegram->sendWidget($result->chatId);
+            } elseif ($result->command === '/app') {
+                $telegram->sendAppButton($result->chatId, $result->replyText);
+            } else {
+                $telegram->sendMessage($result->chatId, $result->replyText);
+            }
         } catch (TelegramDeliveryException|ConnectionException $exception) {
             Log::warning('Telegram webhook reply delivery failed.', [
                 'update_id' => $result->updateId,

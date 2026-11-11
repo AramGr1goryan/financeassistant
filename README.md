@@ -4,7 +4,34 @@ A private, owner-only finance management system. The backend is the source of tr
 
 ## Project status
 
-The manually operated AMD workflow is implemented and tested locally. Production is live at https://financeassistant-kargt-eam.vercel.app (commit `57ecc6c`). The frontend and Laravel health/status endpoints pass smoke checks. Signed-in owner workflows, production PostgreSQL validation, and Telegram webhook delivery still need end-to-end verification; see [the implementation checklist](docs/implementation-plan.md). Bank integrations and automatic income forecasting are intentionally deferred.
+The manually operated AMD workflow is implemented and tested locally. Production is live at https://financeassistant-kargt-eam.vercel.app. The frontend and Laravel health/status endpoints pass smoke checks. Telegram bot support includes complete chat commands, interactive Bot API 10.4 widgets in private chat, and an embedded Telegram Mini App with HMAC-SHA256 signature verification. Safe owner linking and password rotation tools are built into the web UI and CLI. Bank integrations and automatic income forecasting are intentionally deferred.
+
+## Telegram Bot & Mini App
+
+The bot provides two complementary interaction modes:
+1. **Interactive HTML Widgets (Telegram Bot API 10.4):**
+   - Command: `/widget`
+   - Compact native widget inside chat bubbles for quick Balance, Budget, and Accounts checks.
+   - Fully sandboxed (QuickJS, no external network access, theme-aware, 1024-byte query responses).
+2. **Telegram Mini App:**
+   - Command: `/app`
+   - Opens the responsive Web App inside Telegram with cryptographic `initData` verification (HMAC-SHA256, 24h replay window) for automatic owner sign-in.
+   - Complete manual finance operations: Add Transactions (Expense, Income, Transfer), Manage Accounts, Budget Settings, Income Expectations, and Security Settings.
+3. **Chat Commands:**
+   - `/balance` — Current balances (posted vs pending vs credit liabilities).
+   - `/budget` — Authoritative budget limits and available funds.
+   - `/accounts` — List active accounts and balances.
+   - `/create_account <name> <asset|credit> [opening_balance]` — Add account.
+   - `/transactions [limit]` — View recent transactions.
+   - `/expense <account> <amount> [description]` — Record posted expense.
+   - `/income <account> <amount> [description]` — Record posted income.
+   - `/transfer <from> <to> <amount> [description]` — Internal transfer.
+   - `/post_tx <id>` — Post a pending transaction.
+   - `/reverse_tx <id>` — Reverse a posted transaction.
+   - `/set_budget <mandatory> <reserve> <savings> [days]` — Budget planning.
+   - `/expected_income`, `/expect_income`, `/complete_expected_income` — Income expectations.
+   - `/notifications` — Configure alert preferences.
+   - `/help` — Command directory.
 
 ## Local setup
 

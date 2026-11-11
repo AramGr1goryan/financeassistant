@@ -48,6 +48,27 @@ Before production, define key rotation, secret revocation, backup retention and 
 2. **Restore verification drill:** Restore backups into a disposable verification database (`pg_restore --clean --if-exists --no-owner --dbname="$VERIFY_DATABASE"`) and verify row counts and constraints on `accounts`, `transactions`, `budget_settings`, `income_expectations`, `telegram_owner_links`, `telegram_webhook_updates`, `notifications`, and `ai_category_suggestions`.
 3. **Health and monitoring:** Monitor `/up` and `/api/v1/status`, queue failure counts, rate-limiter rejections (`429`), and webhook authorization rejections (`403`) without logging secret headers, tokens, or raw provider payloads.
 
+### Secret and Credential Rotation Procedures
+
+#### 1. Workspace Owner Password Rotation
+If an owner password has been disclosed or compromised:
+- **Via Web Application (Recommended):** The authenticated owner signs in to the dashboard at https://financeassistant-kargt-eam.vercel.app/, navigates to the **Change Password** section, enters the current password, and provides a strong replacement (at least 12 characters, up to 72 bytes). The server validates the existing hash, updates the password using bcrypt via `PUT /api/v1/user/password`, and regenerates the session.
+- **Via Interactive CLI:** Run `php artisan finance:change-password` in an interactive terminal. Enter the user email and type the new password with confirmation (inputs are hidden and never logged).
+
+#### 2. Prisma Postgres Database Connection String Rotation
+If database connection credentials have been exposed or require scheduled rotation:
+1. In the **Prisma Data Platform** (or Vercel Marketplace Storage tab for Prisma Postgres), generate a secondary connection string for the database instance.
+2. In the **Vercel Project Settings → Environment Variables**:
+   - Update `DATABASE_URL` with the new unpooled connection string.
+   - Update `DATABASE_URL_POOLED` with the new pooled connection string.
+3. Trigger a production deployment or promote a deployment so that new FrankenPHP containers boot with the rotated connection strings.
+4. Verify database and application health via `/up` and `/api/v1/status`.
+5. In the Prisma console, safely revoke and delete the old exposed connection string. This achieves zero downtime without leaking credentials into chat or repositories.
+
+#### 3. Telegram WebApp & Webhook Integrity
+- **InitData verification:** Telegram Mini App authenticates incoming webview queries using HMAC-SHA256 (`WebAppData` key) over the alphabetically sorted parameter string, enforcing a 24-hour expiration window against replay attacks. Client-provided user identities are never trusted without cryptographic verification.
+- **Webhook updates:** Webhooks verify `X-Telegram-Bot-Api-Secret-Token` via constant-time comparison before processing. Update processing is idempotent and rate-limited. Webhook registration is automated on container boot via `backend/docker-entrypoint.sh` and can be inspected via `/api/v1/telegram/webhook-info`.
+
 ### Current operational limitations
 
 - Session-backed owner-scoped endpoints for balance, budget, accounts, transactions, and manual income expectations, plus `/api/v1/session` sign-in/sign-out, are implemented. PostgreSQL verification and end-to-end verification through the deployed same-origin frontend proxy are still required before production use.

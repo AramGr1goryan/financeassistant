@@ -8,6 +8,7 @@ use App\Domain\Income\IncomeExpectationService;
 use App\Domain\Income\IncomeExpectationStatus;
 use App\Domain\Money\Money;
 use App\Domain\Telegram\TelegramAuthorizationException;
+use App\Domain\Telegram\TelegramFinanceWidget;
 use App\Domain\Telegram\TelegramOwnerLinkService;
 use App\Domain\Transactions\TransactionStatus;
 use App\Domain\Transactions\TransactionType;
@@ -179,6 +180,134 @@ class TelegramWebhookTest extends TestCase
             && $request->data()['text'] !== '');
     }
 
+    public function test_widget_command_sends_a_private_interactive_widget_within_telegram_size_limits(): void
+    {
+        $this->createLinkedOwner();
+
+        $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $this->updatePayload(460, '/widget'))
+            ->assertOk();
+
+        $html = TelegramFinanceWidget::html();
+        $this->assertLessThanOrEqual(32768, strlen($html));
+        $compressed = gzcompress($html, 9);
+        $this->assertNotFalse($compressed);
+        $this->assertLessThanOrEqual(4096, strlen($compressed));
+        Http::assertSent(fn (HttpRequest $request): bool => str_ends_with($request->url(), '/sendWidget')
+            && $request->data()['chat_id'] === self::OWNER_TELEGRAM_ID
+            && $request->data()['html'] === $html
+            && $request->data()['allow_queries'] === true);
+    }
+
+    public function test_app_command_opens_existing_sign_in_protected_dashboard(): void
+    {
+        $this->createLinkedOwner();
+        config(['app.url' => 'https://finance.example.test']);
+
+        $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $this->updatePayload(465, '/app'))
+            ->assertOk();
+
+        Http::assertSent(fn (HttpRequest $request): bool => str_ends_with($request->url(), '/sendMessage')
+            && $request->data()['reply_markup']['inline_keyboard'][0][0]['web_app']['url'] === 'https://finance.example.test');
+
+        config(['app.url' => 'http://example.test']);
+        $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $this->updatePayload(466, '/app'))
+            ->assertStatus(503);
+    }
+
+    public function test_widget_queries_are_owner_only_and_return_ledger_balance_without_duplicate_mutations(): void
+    {
+        $owner = $this->createLinkedOwner();
+        Account::factory()->for($owner, 'owner')->create(['opening_balance_minor_units' => 12345]);
+        $payload = $this->widgetPayload(461, 'balance');
+
+        foreach (range(1, 2) as $attempt) {
+            $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+                ->postJson('/api/v1/telegram/webhook', $payload)
+                ->assertOk()
+                ->assertJsonPath('duplicate', $attempt === 2);
+        }
+
+        $this->assertSame(1, TelegramWebhookUpdate::query()->where('update_id', 461)->count());
+        Http::assertSent(fn (HttpRequest $request): bool => str_ends_with($request->url(), '/answerWidgetQuery')
+            && $request->data()['widget_query_id'] === 'query-461'
+            && str_contains($request->data()['data'], 'Posted balance: AMD 12,345'));
+
+        $payload = $this->widgetPayload(462, 'budget');
+        $payload['widget_query']['from']['id'] = 999;
+        $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $payload)->assertForbidden();
+
+        $payload = $this->widgetPayload(463, 'balance');
+        $payload['widget_query']['chat']['type'] = 'group';
+        $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $payload)->assertForbidden();
+
+        $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $this->widgetPayload(464, '/set_budget 0 0 0'))
+            ->assertStatus(422);
+        $this->assertSame(0, BudgetSetting::query()->count());
+    }
+
+    public function test_widget_rejects_missing_secret_and_non_private_or_non_data_queries(): void
+    {
+        $this->createLinkedOwner();
+        $payload = $this->widgetPayload(467, 'balance');
+
+        $this->postJson('/api/v1/telegram/webhook', $payload)->assertForbidden();
+
+        unset($payload['widget_query']['chat']);
+        $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $payload)->assertStatus(422);
+
+        $payload = $this->widgetPayload(468, 'balance');
+        $payload['widget_query']['type'] = ['type' => 'sign_data'];
+        $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $payload)->assertStatus(422);
+
+        Http::assertNothingSent();
+        $this->assertSame(0, TelegramWebhookUpdate::query()->count());
+    }
+
+    public function test_widget_query_delivery_failure_is_retryable(): void
+    {
+        $this->createLinkedOwner();
+        Http::swap(new Factory);
+        Http::fake([
+            'api.telegram.org/*' => Http::sequence()
+                ->push(['ok' => false], 503)
+                ->push(['ok' => true], 200),
+        ]);
+        $payload = $this->widgetPayload(469, 'budget');
+
+        $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $payload)->assertStatus(503);
+        $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $payload)->assertOk()->assertJsonPath('duplicate', true);
+
+        $this->assertSame(1, TelegramWebhookUpdate::query()->where('update_id', 469)->count());
+        Http::assertSentCount(2);
+    }
+
+    /** @return array<string, mixed> */
+    private function widgetPayload(int $updateId, string $data): array
+    {
+        return [
+            'update_id' => $updateId,
+            'widget_query' => [
+                'id' => 'query-'.$updateId,
+                'from' => ['id' => self::OWNER_TELEGRAM_ID, 'is_bot' => false],
+                'chat' => ['id' => self::OWNER_TELEGRAM_ID, 'type' => 'private'],
+                'message_id' => 10,
+                'chat_instance' => 'test',
+                'type' => ['type' => 'data'],
+                'data' => $data,
+            ],
+        ];
+    }
+
     public function test_delivery_failure_returns_a_retryable_error_and_duplicate_updates_retry_delivery(): void
     {
         $this->createLinkedOwner();
@@ -333,6 +462,206 @@ class TelegramWebhookTest extends TestCase
 
         $this->assertStringContainsString('Completed manual income expectation', (string) $completeResponse->json('reply_text'));
         $this->assertSame(IncomeExpectationStatus::Completed, $ownerExpectation->fresh()->status);
+    }
+
+    public function test_accounts_command_and_create_account_command(): void
+    {
+        $owner = $this->createLinkedOwner();
+
+        // 1. Initial list when no accounts exist
+        $res = $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $this->updatePayload(701, '/accounts'))
+            ->assertOk();
+        $this->assertStringContainsString('No active accounts found', (string) $res->json('reply_text'));
+
+        // 2. Create account validation errors
+        $res = $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $this->updatePayload(702, '/create_account'))
+            ->assertOk();
+        $this->assertStringContainsString('Usage: /create_account', (string) $res->json('reply_text'));
+
+        $res = $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $this->updatePayload(703, '/create_account Checking invalid_type'))
+            ->assertOk();
+        $this->assertStringContainsString('Invalid account type', (string) $res->json('reply_text'));
+
+        // 3. Create valid asset account
+        $res = $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $this->updatePayload(704, '/create_account Checking asset 100000'))
+            ->assertOk();
+        $this->assertStringContainsString('Account created successfully', (string) $res->json('reply_text'));
+        $this->assertStringContainsString('Checking', (string) $res->json('reply_text'));
+        $this->assertStringContainsString('AMD 100,000', (string) $res->json('reply_text'));
+
+        // 4. Duplicate name rejected
+        $res = $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $this->updatePayload(705, '/create_account Checking asset 5000'))
+            ->assertOk();
+        $this->assertStringContainsString('already exists', (string) $res->json('reply_text'));
+
+        // 5. Create credit account
+        $res = $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $this->updatePayload(706, '/create_account "Credit Card" credit 25000'))
+            ->assertOk();
+        $this->assertStringContainsString('Account created successfully', (string) $res->json('reply_text'));
+
+        // 6. List accounts
+        $res = $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $this->updatePayload(707, '/accounts'))
+            ->assertOk();
+        $text = (string) $res->json('reply_text');
+        $this->assertStringContainsString('Accounts (AMD):', $text);
+        $this->assertStringContainsString('Checking (ASSET): AMD 100,000', $text);
+        $this->assertStringContainsString('Credit Card (CREDIT): Liability AMD 25,000', $text);
+    }
+
+    public function test_transactions_expense_income_and_transfer_commands(): void
+    {
+        $owner = $this->createLinkedOwner();
+
+        $accountA = Account::factory()->for($owner, 'owner')->create([
+            'name' => 'Main',
+            'type' => AccountType::Asset,
+            'currency' => 'AMD',
+            'currency_exponent' => 0,
+            'opening_balance_minor_units' => 200_000,
+        ]);
+        $accountB = Account::factory()->for($owner, 'owner')->create([
+            'name' => 'Savings',
+            'type' => AccountType::Asset,
+            'currency' => 'AMD',
+            'currency_exponent' => 0,
+            'opening_balance_minor_units' => 50_000,
+        ]);
+
+        // 1. Expense
+        $res = $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $this->updatePayload(801, '/expense Main 15000 Groceries'))
+            ->assertOk();
+        $this->assertStringContainsString('Recorded expense:', (string) $res->json('reply_text'));
+        $this->assertStringContainsString('AMD 15,000', (string) $res->json('reply_text'));
+
+        // 2. Income
+        $res = $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $this->updatePayload(802, '/income Main 80000 Consulting'))
+            ->assertOk();
+        $this->assertStringContainsString('Recorded income:', (string) $res->json('reply_text'));
+        $this->assertStringContainsString('AMD 80,000', (string) $res->json('reply_text'));
+
+        // 3. Transfer
+        $res = $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $this->updatePayload(803, '/transfer Main Savings 30000 Reserve fund'))
+            ->assertOk();
+        $this->assertStringContainsString('Recorded transfer:', (string) $res->json('reply_text'));
+        $this->assertStringContainsString('From: Main', (string) $res->json('reply_text'));
+        $this->assertStringContainsString('To: Savings', (string) $res->json('reply_text'));
+        $this->assertStringContainsString('AMD 30,000', (string) $res->json('reply_text'));
+
+        // 4. List transactions
+        $res = $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $this->updatePayload(804, '/transactions'))
+            ->assertOk();
+        $text = (string) $res->json('reply_text');
+        $this->assertStringContainsString('Recent transactions', $text);
+        $this->assertStringContainsString('Groceries', $text);
+        $this->assertStringContainsString('Consulting', $text);
+        $this->assertStringContainsString('Reserve fund', $text);
+
+        // 5. Verify balances:
+        // Main: 200,000 - 15,000 + 80,000 - 30,000 = 235,000 AMD.
+        // Savings: 50,000 + 30,000 = 80,000 AMD.
+        // Total posted: 315,000 AMD.
+        $res = $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $this->updatePayload(805, '/balance'))
+            ->assertOk();
+        $this->assertStringContainsString('Posted balance: AMD 315,000', (string) $res->json('reply_text'));
+    }
+
+    public function test_post_and_reverse_transaction_commands(): void
+    {
+        $owner = $this->createLinkedOwner();
+
+        $account = Account::factory()->for($owner, 'owner')->create([
+            'name' => 'Card',
+            'type' => AccountType::Asset,
+            'currency' => 'AMD',
+            'currency_exponent' => 0,
+            'opening_balance_minor_units' => 100_000,
+        ]);
+
+        $pendingTx = Transaction::factory()->for($account)->create([
+            'type' => TransactionType::Expense,
+            'status' => TransactionStatus::Pending,
+            'amount_minor_units' => 12_000,
+            'description' => 'Pending Restaurant',
+        ]);
+
+        // 1. Post pending transaction
+        $res = $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $this->updatePayload(901, '/post_tx '.$pendingTx->id))
+            ->assertOk();
+        $this->assertStringContainsString('Transaction posted:', (string) $res->json('reply_text'));
+        $this->assertStringContainsString('POSTED', (string) $res->json('reply_text'));
+        $this->assertSame(TransactionStatus::Posted, $pendingTx->fresh()->status);
+
+        // 2. Attempting to post again fails
+        $res = $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $this->updatePayload(902, '/post_tx '.$pendingTx->id))
+            ->assertOk();
+        $this->assertStringContainsString("already in status 'POSTED'", (string) $res->json('reply_text'));
+
+        // 3. Reverse posted transaction
+        $res = $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $this->updatePayload(903, '/reverse_tx '.$pendingTx->id))
+            ->assertOk();
+        $this->assertStringContainsString('Transaction reversed:', (string) $res->json('reply_text'));
+        $this->assertStringContainsString('REVERSED', (string) $res->json('reply_text'));
+        $this->assertSame(TransactionStatus::Reversed, $pendingTx->fresh()->status);
+    }
+
+    public function test_widget_query_accounts(): void
+    {
+        $owner = $this->createLinkedOwner();
+
+        Account::factory()->for($owner, 'owner')->create([
+            'name' => 'Cash Box',
+            'type' => AccountType::Asset,
+            'currency' => 'AMD',
+            'currency_exponent' => 0,
+            'opening_balance_minor_units' => 45_000,
+        ]);
+
+        $payload = $this->widgetPayload(950, 'accounts');
+
+        $res = $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $payload)
+            ->assertOk();
+
+        $this->assertStringContainsString('Accounts (AMD):', (string) $res->json('reply_text'));
+        $this->assertStringContainsString('Cash Box', (string) $res->json('reply_text'));
+        $this->assertStringContainsString('AMD 45,000', (string) $res->json('reply_text'));
+    }
+
+    public function test_foreign_user_cannot_access_accounts_or_create_transactions(): void
+    {
+        $owner = $this->createLinkedOwner();
+        $otherUser = User::factory()->create();
+
+        $foreignAccount = Account::factory()->for($otherUser, 'owner')->create([
+            'name' => 'Foreign',
+            'type' => AccountType::Asset,
+            'currency' => 'AMD',
+            'currency_exponent' => 0,
+            'opening_balance_minor_units' => 500_000,
+        ]);
+
+        // Attempting to spend from other user's account
+        $res = $this->withHeader('X-Telegram-Bot-Api-Secret-Token', self::WEBHOOK_SECRET)
+            ->postJson('/api/v1/telegram/webhook', $this->updatePayload(960, '/expense Foreign 10000 Theft'))
+            ->assertOk();
+
+        $this->assertStringContainsString("not found among your active accounts", (string) $res->json('reply_text'));
+        $this->assertSame(0, Transaction::query()->where('account_id', $foreignAccount->id)->count());
     }
 
     private function createLinkedOwner(): User

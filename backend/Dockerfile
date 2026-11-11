@@ -30,6 +30,8 @@ FROM base AS runtime
 
 COPY --from=dependencies --chown=www-data:www-data /app /app
 COPY --chown=www-data:www-data Caddyfile /etc/frankenphp/Caddyfile
+COPY --chown=www-data:www-data docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 RUN setcap CAP_NET_BIND_SERVICE=+eip /usr/local/bin/frankenphp \
     && chown -R www-data:www-data /config/caddy /data/caddy
@@ -49,4 +51,5 @@ ENV PORT=80 \
 
 USER www-data
 
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["frankenphp", "run", "--config", "/etc/frankenphp/Caddyfile"]

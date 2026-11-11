@@ -10,6 +10,6 @@ final readonly class TelegramWebhookResult
         public int $chatId,
         public ?string $command,
         public string $replyText,
+        public ?string $widgetQueryId = null,
     ) {}
 }
-

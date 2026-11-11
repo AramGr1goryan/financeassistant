@@ -7,7 +7,8 @@ import { BudgetSettingsForm } from "./BudgetSettingsForm";
 import { ManualAccountForm } from "./ManualAccountForm";
 import { ManualTransactionForm } from "./ManualTransactionForm";
 import { ManualIncomeExpectationForm } from "./ManualIncomeExpectationForm";
-import { budgetRefreshOutcome, completeManualIncomeExpectation, fetchAccounts, fetchIncomeExpectations, fetchTransactions, fetchWorkspaceOverview, SessionError, signIn, signOut, updateManualTransactionStatus, type WorkspaceOverviewResult } from "../lib/api";
+import { SecurityAndTelegramSection } from "./SecurityAndTelegramSection";
+import { authenticateWithTelegramInitData, budgetRefreshOutcome, completeManualIncomeExpectation, fetchAccounts, fetchIncomeExpectations, fetchTransactions, fetchWorkspaceOverview, SessionError, signIn, signOut, updateManualTransactionStatus, type WorkspaceOverviewResult } from "../lib/api";
 
 export function LiveDashboard({ currentPath = "/" }: { currentPath?: "/" | "/budget" | "/accounts" | "/transactions" | "/expectations" }) {
   const [result, setResult] = useState<WorkspaceOverviewResult | null>(null);
@@ -73,6 +74,25 @@ export function LiveDashboard({ currentPath = "/" }: { currentPath?: "/" | "/bud
     void refresh();
     return () => { pending.current++; };
   }, [refresh]);
+
+  useEffect(() => {
+    // Attempt Telegram WebApp auto-authentication if opened inside Telegram
+    if (typeof window === "undefined") return;
+    const tg = (window as unknown as { Telegram?: { WebApp?: { initData?: string; ready?: () => void; expand?: () => void } } }).Telegram?.WebApp;
+    if (tg?.ready) tg.ready();
+    if (tg?.expand) tg.expand();
+
+    if (tg?.initData && result?.connectionState === "unauthenticated") {
+      void (async () => {
+        try {
+          await authenticateWithTelegramInitData(tg.initData!);
+          await refresh();
+        } catch {
+          // If initData verification fails, fall back to normal login
+        }
+      })();
+    }
+  }, [result?.connectionState, refresh]);
 
   async function handleSignIn(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -239,6 +259,11 @@ export function LiveDashboard({ currentPath = "/" }: { currentPath?: "/" | "/bud
               onBusyChange={setBusy}
               onSaved={refreshAfterBudgetSave}
             />
+          )}
+          {currentPath === "/" && (
+            <div className="mt-8 border-t border-slate-200 pt-8">
+              <SecurityAndTelegramSection busy={busy} onBusyChange={setBusy} />
+            </div>
           )}
         </>
       )}
