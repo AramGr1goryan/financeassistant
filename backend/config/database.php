@@ -86,8 +86,9 @@ return [
 
         'pgsql' => [
             'driver' => 'pgsql',
-            // Prisma's pooled endpoint uses transaction pooling; avoid session-level SET commands.
-            'url' => env('DB_URL') ?: env('DATABASE_URL_POOLED') ?: env('DATABASE_URL'),
+            // Prefer direct connection for Laravel transactions, locks, and DDL.
+            // If pooled is used, enable emulated prepares for PgBouncer transaction-mode compatibility.
+            'url' => env('DB_URL') ?: env('DATABASE_URL') ?: env('DATABASE_URL_POOLED'),
             'host' => env('DB_HOST', '127.0.0.1'),
             'port' => env('DB_PORT', '5432'),
             'database' => env('DB_DATABASE', 'laravel'),
@@ -97,11 +98,14 @@ return [
             'prefix' => '',
             'prefix_indexes' => true,
             'sslmode' => env('DB_SSLMODE', 'prefer'),
+            'options' => extension_loaded('pdo_pgsql') ? [
+                \PDO::ATTR_EMULATE_PREPARES => true,
+            ] : [],
         ],
 
         'pgsql_direct' => [
             'driver' => 'pgsql',
-            'url' => env('DATABASE_URL'),
+            'url' => env('DATABASE_URL') ?: env('DATABASE_URL_POOLED'),
             'host' => env('DB_HOST', '127.0.0.1'),
             'port' => env('DB_PORT', '5432'),
             'database' => env('DB_DATABASE', 'laravel'),
@@ -111,6 +115,9 @@ return [
             'prefix' => '',
             'prefix_indexes' => true,
             'sslmode' => env('DB_SSLMODE', 'prefer'),
+            'options' => extension_loaded('pdo_pgsql') ? [
+                \PDO::ATTR_EMULATE_PREPARES => true,
+            ] : [],
         ],
 
         'sqlsrv' => [

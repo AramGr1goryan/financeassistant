@@ -157,7 +157,23 @@ class TelegramManagementController extends Controller
 
         $linkRecord = null;
         $userRecord = null;
+        $webhookUpdatesCount = null;
         $dbTransactionTest = null;
+        $dbHost = null;
+        $directDbHost = null;
+        try {
+            $url = config('database.connections.pgsql.url');
+            if (is_string($url) && $url !== '') {
+                $dbHost = parse_url($url, PHP_URL_HOST);
+            }
+            $directUrl = config('database.connections.pgsql_direct.url');
+            if (is_string($directUrl) && $directUrl !== '') {
+                $directDbHost = parse_url($directUrl, PHP_URL_HOST);
+            }
+        } catch (\Throwable) {
+            // ignore
+        }
+
         try {
             $link = TelegramOwnerLink::query()->first();
             if ($link !== null) {
@@ -177,9 +193,12 @@ class TelegramManagementController extends Controller
                     'email' => $user->email,
                 ];
             }
+            $webhookUpdatesCount = \App\Models\TelegramWebhookUpdate::query()->count();
+
             \Illuminate\Support\Facades\DB::transaction(function () use ($user) {
                 if ($user) {
-                    User::query()->whereKey($user->getKey())->lockForUpdate()->first();
+                    User::query()->whereKey($user->getKey())->first();
+                    \App\Models\TelegramWebhookUpdate::query()->where('update_id', 1)->first();
                 }
             });
             $dbTransactionTest = 'ok';
@@ -197,6 +216,9 @@ class TelegramManagementController extends Controller
             'owner_error' => $ownerError,
             'link_record' => $linkRecord,
             'user_record' => $userRecord,
+            'webhook_updates_count' => $webhookUpdatesCount,
+            'db_host' => $dbHost,
+            'direct_db_host' => $directDbHost,
             'db_transaction_test' => $dbTransactionTest,
             'auto_registered' => $autoRegistered,
             'webhook_info' => $webhookInfo,

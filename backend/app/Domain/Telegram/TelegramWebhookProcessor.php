@@ -42,27 +42,27 @@ final class TelegramWebhookProcessor
             $validated['chat_type'],
         );
 
-        return DB::transaction(function () use ($owner, $validated): TelegramWebhookResult {
-            $lockedOwner = User::query()->whereKey($owner->getKey())->lockForUpdate()->firstOrFail();
+        try {
+            return DB::transaction(function () use ($owner, $validated): TelegramWebhookResult {
+                $lockedOwner = $owner;
 
-            $existing = TelegramWebhookUpdate::query()
-                ->where('update_id', $validated['update_id'])
-                ->first();
+                $existing = TelegramWebhookUpdate::query()
+                    ->where('update_id', $validated['update_id'])
+                    ->first();
 
-            if ($existing !== null) {
-                return new TelegramWebhookResult(
-                    duplicate: true,
-                    updateId: $existing->update_id,
-                    chatId: $existing->telegram_chat_id,
-                    command: $existing->command,
-                    replyText: $existing->response_text,
-                    widgetQueryId: $validated['widget_query_id'],
-                );
-            }
+                if ($existing !== null) {
+                    return new TelegramWebhookResult(
+                        duplicate: true,
+                        updateId: $existing->update_id,
+                        chatId: $existing->telegram_chat_id,
+                        command: $existing->command,
+                        replyText: $existing->response_text,
+                        widgetQueryId: $validated['widget_query_id'],
+                    );
+                }
 
-            $commandResult = $this->commands->handle($lockedOwner, $validated['text']);
+                $commandResult = $this->commands->handle($lockedOwner, $validated['text']);
 
-            try {
                 $record = new TelegramWebhookUpdate([
                     'update_id' => $validated['update_id'],
                     'telegram_user_id' => $validated['telegram_user_id'],
@@ -73,34 +73,35 @@ final class TelegramWebhookProcessor
                 ]);
                 $record->owner()->associate($lockedOwner);
                 $record->save();
-            } catch (QueryException $exception) {
-                $duplicate = TelegramWebhookUpdate::query()
-                    ->where('update_id', $validated['update_id'])
-                    ->first();
 
-                if ($duplicate !== null) {
-                    return new TelegramWebhookResult(
-                        duplicate: true,
-                        updateId: $duplicate->update_id,
-                        chatId: $duplicate->telegram_chat_id,
-                        command: $duplicate->command,
-                        replyText: $duplicate->response_text,
-                        widgetQueryId: $validated['widget_query_id'],
-                    );
-                }
+                return new TelegramWebhookResult(
+                    duplicate: false,
+                    updateId: $record->update_id,
+                    chatId: $record->telegram_chat_id,
+                    command: $record->command,
+                    replyText: $record->response_text,
+                    widgetQueryId: $validated['widget_query_id'],
+                );
+            });
+        } catch (QueryException $exception) {
+            // If save failed due to concurrent duplicate update_id, check for existing record outside the rolled-back transaction
+            $duplicate = TelegramWebhookUpdate::query()
+                ->where('update_id', $validated['update_id'])
+                ->first();
 
-                throw $exception;
+            if ($duplicate !== null) {
+                return new TelegramWebhookResult(
+                    duplicate: true,
+                    updateId: $duplicate->update_id,
+                    chatId: $duplicate->telegram_chat_id,
+                    command: $duplicate->command,
+                    replyText: $duplicate->response_text,
+                    widgetQueryId: $validated['widget_query_id'],
+                );
             }
 
-            return new TelegramWebhookResult(
-                duplicate: false,
-                updateId: $record->update_id,
-                chatId: $record->telegram_chat_id,
-                command: $record->command,
-                replyText: $record->response_text,
-                widgetQueryId: $validated['widget_query_id'],
-            );
-        });
+            throw $exception;
+        }
     }
 
     /**
