@@ -99,7 +99,7 @@ class TelegramManagementController extends Controller
     {
         $migrationOutput = '';
         try {
-            \Illuminate\Support\Facades\Artisan::call('migrate', ['--force' => true, '--isolated' => true]);
+            \Illuminate\Support\Facades\Artisan::call('migrate', ['--force' => true]);
             $migrationOutput = trim(\Illuminate\Support\Facades\Artisan::output());
         } catch (\Throwable $e) {
             $migrationOutput = 'Migration notice: '.$e->getMessage();
@@ -112,6 +112,9 @@ class TelegramManagementController extends Controller
         $webhookSecretConfigured = is_string($webhookSecret) && trim((string) $webhookSecret) !== '';
 
         $isLinked = false;
+        $userCount = User::query()->count();
+        $ownerError = null;
+
         if ($configuredId !== null) {
             $link = TelegramOwnerLink::query()
                 ->where('telegram_user_id', $configuredId)
@@ -127,9 +130,11 @@ class TelegramManagementController extends Controller
                     try {
                         $linkService->linkVerifiedOwner($owner, $configuredId, $configuredId);
                         $isLinked = true;
-                    } catch (\Throwable) {
-                        // ignore
+                    } catch (\Throwable $e) {
+                        $ownerError = $e->getMessage();
                     }
+                } else {
+                    $ownerError = 'No user exists in users table';
                 }
             }
         }
@@ -157,7 +162,9 @@ class TelegramManagementController extends Controller
             'bot_token_configured' => $botTokenConfigured,
             'owner_id_configured' => $configuredId !== null,
             'webhook_secret_configured' => $webhookSecretConfigured,
+            'user_count' => $userCount,
             'owner_linked' => $isLinked,
+            'owner_error' => $ownerError,
             'auto_registered' => $autoRegistered,
             'migrations' => $migrationOutput,
             'webhook_info' => $webhookInfo,
