@@ -120,14 +120,19 @@ final class TelegramBotClient
             throw new TelegramDeliveryException;
         }
 
-        $response = Http::acceptJson()
-            ->asJson()
-            ->connectTimeout(5)
-            ->timeout(15)
-            ->post("https://api.telegram.org/bot{$token}/{$method}", $data);
+        try {
+            $response = Http::acceptJson()
+                ->asJson()
+                ->connectTimeout(5)
+                ->timeout(15)
+                ->post("https://api.telegram.org/bot{$token}/{$method}", $data);
+        } catch (\Throwable $exception) {
+            throw new TelegramDeliveryException(500, $exception->getMessage());
+        }
 
         if (! $response->successful() || $response->json('ok') !== true) {
-            throw new TelegramDeliveryException($response->status());
+            $desc = (string) $response->json('description', '');
+            throw new TelegramDeliveryException($response->status(), $desc !== '' ? $desc : null);
         }
 
         return (array) $response->json();

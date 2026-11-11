@@ -155,6 +155,38 @@ class TelegramManagementController extends Controller
             }
         }
 
+        $linkRecord = null;
+        $userRecord = null;
+        $dbTransactionTest = null;
+        try {
+            $link = TelegramOwnerLink::query()->first();
+            if ($link !== null) {
+                $linkRecord = [
+                    'id' => $link->id,
+                    'owner_id' => $link->owner_id,
+                    'telegram_user_id' => $link->telegram_user_id,
+                    'is_active' => $link->is_active,
+                    'verified_at' => $link->verified_at?->toIso8601String(),
+                    'owner_found' => ($link->owner !== null),
+                ];
+            }
+            $user = User::query()->first();
+            if ($user !== null) {
+                $userRecord = [
+                    'id' => $user->id,
+                    'email' => $user->email,
+                ];
+            }
+            \Illuminate\Support\Facades\DB::transaction(function () use ($user) {
+                if ($user) {
+                    User::query()->whereKey($user->getKey())->lockForUpdate()->first();
+                }
+            });
+            $dbTransactionTest = 'ok';
+        } catch (\Throwable $e) {
+            $dbTransactionTest = 'DB error: '.$e->getMessage();
+        }
+
         return response()->json([
             'status' => 'ok',
             'bot_token_configured' => $botTokenConfigured,
@@ -163,6 +195,9 @@ class TelegramManagementController extends Controller
             'user_count' => $userCount,
             'owner_linked' => $isLinked,
             'owner_error' => $ownerError,
+            'link_record' => $linkRecord,
+            'user_record' => $userRecord,
+            'db_transaction_test' => $dbTransactionTest,
             'auto_registered' => $autoRegistered,
             'webhook_info' => $webhookInfo,
         ])->header('Cache-Control', 'no-store');

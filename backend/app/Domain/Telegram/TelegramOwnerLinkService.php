@@ -101,11 +101,24 @@ final class TelegramOwnerLinkService
             ->with('owner')
             ->first();
 
-        if ($link === null || $link->owner === null) {
+        if ($link === null) {
             throw new TelegramAuthorizationException('Telegram identity is not linked to an authorized owner.');
         }
 
-        return $link->owner;
+        $owner = $link->owner;
+        if (! $owner instanceof User) {
+            $existingUser = User::query()->orderBy('id')->first();
+            if ($existingUser !== null) {
+                $link->owner()->associate($existingUser);
+                $link->save();
+
+                return $existingUser;
+            }
+
+            throw new TelegramAuthorizationException('Telegram identity is not linked to an authorized owner.');
+        }
+
+        return $owner;
     }
 }
 

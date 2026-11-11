@@ -6,8 +6,8 @@ use RuntimeException;
 
 final class TelegramDeliveryException extends RuntimeException
 {
-    public function __construct(public readonly ?int $httpStatus = null)
+    public function __construct(public readonly ?int $httpStatus = null, ?string $detail = null)
     {
-        parent::__construct('Telegram did not accept the reply.');
+        parent::__construct($detail ?? 'Telegram did not accept the reply.');
     }
 }

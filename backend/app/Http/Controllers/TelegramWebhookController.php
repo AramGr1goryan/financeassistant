@@ -33,6 +33,20 @@ final class TelegramWebhookController extends Controller
             return response()->json([
                 'message' => $exception->getMessage(),
             ], 422)->header('Cache-Control', 'no-store');
+        } catch (\Throwable $exception) {
+            Log::error('Telegram webhook unexpected error: '.$exception->getMessage(), [
+                'exception' => get_class($exception),
+                'file' => $exception->getFile(),
+                'line' => $exception->getLine(),
+                'trace' => $exception->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'message' => 'Internal server error.',
+                'error' => $exception->getMessage(),
+                'exception' => get_class($exception),
+                'file' => basename($exception->getFile()).':'.$exception->getLine(),
+            ], 500)->header('Cache-Control', 'no-store');
         }
 
         try {
@@ -45,8 +59,8 @@ final class TelegramWebhookController extends Controller
             } else {
                 $telegram->sendMessage($result->chatId, $result->replyText);
             }
-        } catch (TelegramDeliveryException|ConnectionException $exception) {
-            Log::warning('Telegram webhook reply delivery failed.', [
+        } catch (\Throwable $exception) {
+            Log::warning('Telegram webhook reply delivery failed: '.$exception->getMessage(), [
                 'update_id' => $result->updateId,
                 'http_status' => $exception instanceof TelegramDeliveryException ? $exception->httpStatus : null,
             ]);
