@@ -23,7 +23,9 @@ final class TelegramWebhookController extends Controller
                 $request->json()->all(),
                 is_string($secretHeader) ? $secretHeader : null,
             );
-        } catch (TelegramAuthorizationException) {
+        } catch (TelegramAuthorizationException $exception) {
+            Log::warning('Telegram webhook authorization failed: '.$exception->getMessage());
+
             return response()->json([
                 'message' => 'Forbidden.',
             ], 403)->header('Cache-Control', 'no-store');

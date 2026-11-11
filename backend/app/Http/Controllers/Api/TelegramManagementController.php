@@ -94,5 +94,74 @@ class TelegramManagementController extends Controller
             'data' => $info,
         ])->header('Cache-Control', 'no-store');
     }
+
+    public function status(TelegramBotClient $botClient, TelegramOwnerLinkService $linkService): JsonResponse
+    {
+        $migrationOutput = '';
+        try {
+            \Illuminate\Support\Facades\Artisan::call('migrate', ['--force' => true, '--isolated' => true]);
+            $migrationOutput = trim(\Illuminate\Support\Facades\Artisan::output());
+        } catch (\Throwable $e) {
+            $migrationOutput = 'Migration notice: '.$e->getMessage();
+        }
+
+        $botToken = config('services.telegram.bot_token');
+        $botTokenConfigured = is_string($botToken) && trim($botToken) !== '';
+        $configuredId = $linkService->configuredOwnerTelegramId();
+        $webhookSecret = config('services.telegram.webhook_secret');
+        $webhookSecretConfigured = is_string($webhookSecret) && trim((string) $webhookSecret) !== '';
+
+        $isLinked = false;
+        if ($configuredId !== null) {
+            $link = TelegramOwnerLink::query()
+                ->where('telegram_user_id', $configuredId)
+                ->where('is_active', true)
+                ->whereNotNull('verified_at')
+                ->first();
+
+            $isLinked = $link !== null;
+
+            if (! $isLinked) {
+                $owner = User::query()->orderBy('id')->first();
+                if ($owner !== null) {
+                    try {
+                        $linkService->linkVerifiedOwner($owner, $configuredId, $configuredId);
+                        $isLinked = true;
+                    } catch (\Throwable) {
+                        // ignore
+                    }
+                }
+            }
+        }
+
+        $webhookInfo = null;
+        $autoRegistered = false;
+        if ($botTokenConfigured) {
+            try {
+                $webhookInfo = $botClient->getWebhookInfo();
+                $expectedUrl = $botClient->resolveBaseAppUrl().'/api/v1/telegram/webhook';
+                $currentUrl = (string) ($webhookInfo['url'] ?? '');
+
+                if ($currentUrl !== $expectedUrl) {
+                    $botClient->registerWebhook($expectedUrl);
+                    $autoRegistered = true;
+                    $webhookInfo = $botClient->getWebhookInfo();
+                }
+            } catch (\Throwable $e) {
+                $webhookInfo = ['error' => $e->getMessage()];
+            }
+        }
+
+        return response()->json([
+            'status' => 'ok',
+            'bot_token_configured' => $botTokenConfigured,
+            'owner_id_configured' => $configuredId !== null,
+            'webhook_secret_configured' => $webhookSecretConfigured,
+            'owner_linked' => $isLinked,
+            'auto_registered' => $autoRegistered,
+            'migrations' => $migrationOutput,
+            'webhook_info' => $webhookInfo,
+        ])->header('Cache-Control', 'no-store');
+    }
 }
 

@@ -28,7 +28,8 @@ class RegisterTelegramWebhook extends Command
             return self::FAILURE;
         }
 
-        $targetUrl = is_string($url) && $url !== '' ? $url : (rtrim((string) config('app.url'), '/').'/api/v1/telegram/webhook');
+        $defaultBase = $botClient->resolveBaseAppUrl();
+        $targetUrl = is_string($url) && $url !== '' ? $url : (rtrim($defaultBase, '/').'/api/v1/telegram/webhook');
         $this->info("Telegram webhook registered successfully for: {$targetUrl}");
         $this->line('Allowed updates: message, widget_query');
 

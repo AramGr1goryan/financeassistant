@@ -52,7 +52,11 @@ return [
     |
     */
 
-    'url' => env('APP_URL', 'http://localhost'),
+    'url' => env('APP_URL') ?: (
+        env('VERCEL_PROJECT_PRODUCTION_URL')
+            ? 'https://'.env('VERCEL_PROJECT_PRODUCTION_URL')
+            : (env('VERCEL_URL') ? 'https://'.env('VERCEL_URL') : 'https://financeassistant-kargt-eam.vercel.app')
+    ),
 
     /*
     |--------------------------------------------------------------------------

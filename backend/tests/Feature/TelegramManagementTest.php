@@ -125,5 +125,44 @@ class TelegramManagementTest extends TestCase
         $this->assertSame('https://financeassistant.test/api/v1/telegram/webhook', $infoRes->json('data.url'));
         $this->assertSame(['message', 'widget_query'], $infoRes->json('data.allowed_updates'));
     }
+
+    public function test_telegram_status_endpoint_inspects_and_auto_registers_webhook_and_links_owner(): void
+    {
+        $owner = User::factory()->create();
+
+        Http::fake([
+            'https://api.telegram.org/bot'.self::BOT_TOKEN.'/getWebhookInfo' => Http::sequence()
+                ->push([
+                    'ok' => true,
+                    'result' => [
+                        'url' => '',
+                        'pending_update_count' => 0,
+                    ],
+                ], 200)
+                ->push([
+                    'ok' => true,
+                    'result' => [
+                        'url' => 'https://financeassistant.test/api/v1/telegram/webhook',
+                        'pending_update_count' => 0,
+                    ],
+                ], 200),
+            'https://api.telegram.org/bot'.self::BOT_TOKEN.'/setWebhook' => Http::response([
+                'ok' => true,
+                'result' => true,
+                'description' => 'Webhook was set',
+            ], 200),
+        ]);
+
+        $res = $this->getJson('/api/v1/telegram/status')->assertOk();
+
+        $this->assertTrue($res->json('bot_token_configured'));
+        $this->assertTrue($res->json('owner_id_configured'));
+        $this->assertTrue($res->json('webhook_secret_configured'));
+        $this->assertTrue($res->json('owner_linked'));
+        $this->assertTrue($res->json('auto_registered'));
+        $this->assertSame('https://financeassistant.test/api/v1/telegram/webhook', $res->json('webhook_info.url'));
+
+        $this->assertSame(1, TelegramOwnerLink::query()->where('owner_id', $owner->id)->count());
+    }
 }
 

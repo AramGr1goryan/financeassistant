@@ -23,11 +23,7 @@ final class TelegramBotClient
 
     public function sendAppButton(int $chatId, string $text): void
     {
-        $url = config('app.url');
-        if (! is_string($url) || filter_var($url, FILTER_VALIDATE_URL) === false
-            || parse_url($url, PHP_URL_SCHEME) !== 'https') {
-            throw new TelegramDeliveryException;
-        }
+        $url = $this->resolveBaseAppUrl();
 
         $this->post('sendMessage', [
             'chat_id' => $chatId,
@@ -54,7 +50,8 @@ final class TelegramBotClient
      */
     public function registerWebhook(?string $url = null, ?string $secretToken = null): array
     {
-        $webhookUrl = $url ?? (rtrim((string) config('app.url'), '/').'/api/v1/telegram/webhook');
+        $baseUrl = $this->resolveBaseAppUrl();
+        $webhookUrl = $url ?? ($baseUrl.'/api/v1/telegram/webhook');
         $secret = $secretToken ?? config('services.telegram.webhook_secret');
 
         $data = [
@@ -67,6 +64,25 @@ final class TelegramBotClient
         }
 
         return $this->post('setWebhook', $data);
+    }
+
+    public function resolveBaseAppUrl(): string
+    {
+        $url = config('app.url');
+        if (is_string($url) && $url !== '' && ! str_starts_with($url, 'http://localhost')) {
+            if (filter_var($url, FILTER_VALIDATE_URL) === false || parse_url($url, PHP_URL_SCHEME) !== 'https') {
+                throw new TelegramDeliveryException;
+            }
+
+            return rtrim($url, '/');
+        }
+
+        $vercelHost = env('VERCEL_PROJECT_PRODUCTION_URL') ?? env('VERCEL_URL');
+        if (is_string($vercelHost) && trim($vercelHost) !== '') {
+            return 'https://'.ltrim(trim($vercelHost), 'https://');
+        }
+
+        return 'https://financeassistant-kargt-eam.vercel.app';
     }
 
     /**

@@ -21,6 +21,9 @@ Route::prefix('api/v1')->name('api.v1.')->group(function (): void {
     Route::post('/telegram/auth', [TelegramAuthController::class, 'authenticate'])
         ->middleware('throttle:10,1')
         ->name('telegram.auth');
+    Route::get('/telegram/status', [TelegramManagementController::class, 'status'])
+        ->middleware('throttle:30,1')
+        ->name('telegram.status');
 
     Route::middleware(AuthenticateFinancialApi::class.':web')->group(function (): void {
         Route::delete('/session', [SessionController::class, 'destroy'])->name('session.destroy');
