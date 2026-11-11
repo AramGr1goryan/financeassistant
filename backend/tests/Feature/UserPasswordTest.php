@@ -93,3 +93,4 @@ class UserPasswordTest extends TestCase
         ])->assertNoContent();
     }
 }
+

@@ -64,3 +64,4 @@ final class TelegramAuthService
         return $this->ownerLinks->resolveAuthorizedOwner($telegramUserId, $telegramUserId, 'private');
     }
 }
+

@@ -35,3 +35,4 @@ class RegisterTelegramWebhook extends Command
         return self::SUCCESS;
     }
 }
+

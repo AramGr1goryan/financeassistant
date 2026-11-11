@@ -115,3 +115,4 @@ class TelegramAuthTest extends TestCase
         return http_build_query($params);
     }
 }
+

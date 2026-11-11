@@ -49,3 +49,4 @@ class LinkTelegramOwner extends Command
         return self::SUCCESS;
     }
 }
+

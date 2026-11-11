@@ -14,3 +14,4 @@ if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
 fi
 
 exec "$@"
+

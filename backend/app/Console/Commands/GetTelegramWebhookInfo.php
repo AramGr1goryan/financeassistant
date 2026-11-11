@@ -37,3 +37,4 @@ class GetTelegramWebhookInfo extends Command
         return self::SUCCESS;
     }
 }
+

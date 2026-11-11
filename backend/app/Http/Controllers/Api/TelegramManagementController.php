@@ -95,3 +95,4 @@ class TelegramManagementController extends Controller
         ])->header('Cache-Control', 'no-store');
     }
 }
+

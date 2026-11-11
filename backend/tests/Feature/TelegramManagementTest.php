@@ -126,3 +126,4 @@ class TelegramManagementTest extends TestCase
         $this->assertSame(['message', 'widget_query'], $infoRes->json('data.allowed_updates'));
     }
 }
+

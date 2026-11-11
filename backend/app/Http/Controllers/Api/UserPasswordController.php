@@ -40,3 +40,4 @@ class UserPasswordController extends Controller
         ])->header('Cache-Control', 'no-store');
     }
 }
+

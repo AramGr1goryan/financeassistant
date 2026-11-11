@@ -60,3 +60,4 @@ class ChangeUserPassword extends Command
         return self::SUCCESS;
     }
 }
+

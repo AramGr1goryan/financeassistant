@@ -36,3 +36,4 @@ return new class extends Migration
         // Safe no-op to prevent inadvertent unlinking on rollback
     }
 };
+
