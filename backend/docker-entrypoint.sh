@@ -4,7 +4,11 @@ set -e
 # Run database migrations if PostgreSQL connection is configured
 if [ -n "$DATABASE_URL" ] || [ -n "$DATABASE_URL_POOLED" ] || [ -n "$DB_URL" ]; then
     echo "Running database migrations..."
-    php artisan migrate --force || true
+    if [ -n "$DATABASE_URL" ]; then
+        php artisan migrate --database=pgsql_direct --force || php artisan migrate --force || true
+    else
+        php artisan migrate --force || true
+    fi
 fi
 
 # Automatically register Telegram webhook if bot token is configured

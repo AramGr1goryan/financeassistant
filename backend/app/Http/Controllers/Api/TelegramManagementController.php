@@ -97,14 +97,6 @@ class TelegramManagementController extends Controller
 
     public function status(TelegramBotClient $botClient, TelegramOwnerLinkService $linkService): JsonResponse
     {
-        $migrationOutput = '';
-        try {
-            \Illuminate\Support\Facades\Artisan::call('migrate', ['--force' => true]);
-            $migrationOutput = trim(\Illuminate\Support\Facades\Artisan::output());
-        } catch (\Throwable $e) {
-            $migrationOutput = 'Migration notice: '.$e->getMessage();
-        }
-
         $botToken = config('services.telegram.bot_token');
         $botTokenConfigured = is_string($botToken) && trim($botToken) !== '';
         $configuredId = $linkService->configuredOwnerTelegramId();
@@ -112,30 +104,36 @@ class TelegramManagementController extends Controller
         $webhookSecretConfigured = is_string($webhookSecret) && trim((string) $webhookSecret) !== '';
 
         $isLinked = false;
-        $userCount = User::query()->count();
+        $userCount = 0;
         $ownerError = null;
 
+        try {
+            $userCount = User::query()->count();
+        } catch (\Throwable $e) {
+            $ownerError = 'User count error: '.$e->getMessage();
+        }
+
         if ($configuredId !== null) {
-            $link = TelegramOwnerLink::query()
-                ->where('telegram_user_id', $configuredId)
-                ->where('is_active', true)
-                ->whereNotNull('verified_at')
-                ->first();
+            try {
+                $link = TelegramOwnerLink::query()
+                    ->where('telegram_user_id', $configuredId)
+                    ->where('is_active', true)
+                    ->whereNotNull('verified_at')
+                    ->first();
 
-            $isLinked = $link !== null;
+                $isLinked = $link !== null;
 
-            if (! $isLinked) {
-                $owner = User::query()->orderBy('id')->first();
-                if ($owner !== null) {
-                    try {
+                if (! $isLinked) {
+                    $owner = User::query()->orderBy('id')->first();
+                    if ($owner !== null) {
                         $linkService->linkVerifiedOwner($owner, $configuredId, $configuredId);
                         $isLinked = true;
-                    } catch (\Throwable $e) {
-                        $ownerError = $e->getMessage();
+                    } else {
+                        $ownerError = 'No user exists in users table';
                     }
-                } else {
-                    $ownerError = 'No user exists in users table';
                 }
+            } catch (\Throwable $e) {
+                $ownerError = 'Owner link error: '.$e->getMessage();
             }
         }
 
@@ -166,7 +164,6 @@ class TelegramManagementController extends Controller
             'owner_linked' => $isLinked,
             'owner_error' => $ownerError,
             'auto_registered' => $autoRegistered,
-            'migrations' => $migrationOutput,
             'webhook_info' => $webhookInfo,
         ])->header('Cache-Control', 'no-store');
     }
